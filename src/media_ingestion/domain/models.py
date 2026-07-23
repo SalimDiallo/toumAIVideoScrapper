@@ -83,3 +83,25 @@ class IngestionResult:
     transcript: Transcript | None
     transcript_status: TranscriptStatus
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # filled in after persistence
+    language: str | None = None
+    storage_uri: str | None = None
+
+
+class JobStatus(str, Enum):
+    PENDING = "pending"  # accepted by the API, queued on Kafka
+    RUNNING = "running"  # picked up by a worker
+    COMPLETED = "completed"
+    FAILED = "failed"  # sent to the DLQ
+
+
+@dataclass(frozen=True, slots=True)
+class Job:
+    job_id: str
+    url: str
+    languages: list[str]
+    status: JobStatus = JobStatus.PENDING
+    result_uri: str | None = None
+    error: str | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

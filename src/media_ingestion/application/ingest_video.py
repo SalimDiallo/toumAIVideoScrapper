@@ -9,7 +9,7 @@ Flow:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import structlog
@@ -70,6 +70,8 @@ class IngestVideoUseCase:
         language = self._resolve_language(transcript, metadata, languages)
         storage_uri = self.storage.save(result, language)
         log.info("ingestion.saved", video_id=metadata.video_id, language=language, uri=storage_uri)
+
+        result = replace(result, language=language, storage_uri=storage_uri)
 
         if self.metadata_repo is not None:
             self.metadata_repo.upsert(result, language, storage_uri)

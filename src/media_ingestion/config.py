@@ -41,3 +41,10 @@ class Settings(BaseSettings):
     # Phase 2 metadata catalog
     metadata_backend: Literal["none", "postgres"] = "none"
     postgres_dsn: str = "postgresql+psycopg://toumai:toumai@localhost:5432/toumai"
+
+    # Phase 2 Kafka (API <-> workers decoupling)
+    kafka_bootstrap_servers: str = "localhost:9092"
+    kafka_consumer_group: str = "toumai-workers"
+    topic_job_requested: str = "job.requested"
+    topic_job_completed: str = "job.completed"
+    topic_job_dlq: str = "job.dlq"

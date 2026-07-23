@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
-from .models import AudioAsset, IngestionResult, Transcript, VideoMetadata
+from .models import AudioAsset, IngestionResult, Job, JobStatus, Transcript, VideoMetadata
 
 
 class AudioDownloaderPort(Protocol):
@@ -43,4 +43,24 @@ class StoragePort(Protocol):
 class MetadataRepositoryPort(Protocol):
     def upsert(self, result: IngestionResult, language: str, storage_uri: str) -> None:
         """Index the ingested video in a catalog (e.g. Postgres). Idempotent per video_id."""
+        ...
+
+
+class EventPublisherPort(Protocol):
+    def publish(self, topic: str, key: str, event: dict) -> None:
+        """Publish an event (e.g. to Kafka). Decouples the API from the workers."""
+        ...
+
+
+class JobStorePort(Protocol):
+    def create(self, job: Job) -> None:
+        """Persist a freshly accepted job (status PENDING)."""
+        ...
+
+    def get(self, job_id: str) -> Job | None:
+        ...
+
+    def update_status(
+        self, job_id: str, status: JobStatus, *, result_uri: str | None = None, error: str | None = None
+    ) -> None:
         ...
