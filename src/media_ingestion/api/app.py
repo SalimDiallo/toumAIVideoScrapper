@@ -6,15 +6,24 @@ GET  /jobs/{id} -> current job status (read from Postgres)
 
 from __future__ import annotations
 
+import csv
+import io
 import uuid
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 
 from ..bootstrap import build_job_store, build_publisher
 from ..config import Settings
 from ..domain.models import Job
 from ..domain.ports import EventPublisherPort, JobStorePort
-from .schemas import JobResponse, ProcessAccepted, ProcessRequest
+from .schemas import BatchAccepted, BatchItem, JobResponse, ProcessAccepted, ProcessRequest
+
+
+def _parse_languages(raw: str | None, default: list[str]) -> list[str]:
+    if not raw:
+        return list(default)
+    parts = [p.strip() for chunk in raw.split(",") for p in chunk.replace(";", " ").split()]
+    return [p for p in parts if p] or list(default)
 
 
 def create_app(
@@ -29,22 +38,48 @@ def create_app(
 
     app = FastAPI(title="TOUMAI Ingestion API", version="0.1.0")
 
+    def _submit(url: str, languages: list[str]) -> str:
+        """Create a PENDING job and publish job.requested. Returns the job_id."""
+        job_id = uuid.uuid4().hex
+        job = Job(job_id=job_id, url=url, languages=languages)
+        store.create(job)
+        publisher.publish(
+            settings.topic_job_requested,
+            key=job_id,
+            event={"job_id": job_id, "url": url, "languages": languages},
+        )
+        return job_id
+
     @app.get("/health")
     def health() -> dict:
         return {"status": "ok"}
 
     @app.post("/process", status_code=202, response_model=ProcessAccepted)
     def process(req: ProcessRequest) -> ProcessAccepted:
-        job_id = uuid.uuid4().hex
         languages = req.languages or list(settings.languages)
-        job = Job(job_id=job_id, url=req.url, languages=languages)
-        store.create(job)
-        publisher.publish(
-            settings.topic_job_requested,
-            key=job_id,
-            event={"job_id": job_id, "url": req.url, "languages": languages},
-        )
-        return ProcessAccepted(job_id=job_id, status=job.status.value)
+        job_id = _submit(req.url, languages)
+        return ProcessAccepted(job_id=job_id, status="pending")
+
+    @app.post("/process/csv", status_code=202, response_model=BatchAccepted)
+    async def process_csv(file: UploadFile = File(...)) -> BatchAccepted:
+        raw = (await file.read()).decode("utf-8-sig")
+        reader = csv.DictReader(io.StringIO(raw))
+        if reader.fieldnames is None or "url" not in [f.strip().lower() for f in reader.fieldnames]:
+            raise HTTPException(status_code=400, detail="CSV must have a 'url' column")
+
+        jobs: list[BatchItem] = []
+        errors: list[str] = []
+        for i, row in enumerate(reader, start=2):  # row 1 = header
+            norm = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+            url = norm.get("url", "")
+            if not url:
+                errors.append(f"line {i}: empty url")
+                continue
+            languages = _parse_languages(norm.get("lang") or norm.get("languages"), settings.languages)
+            job_id = _submit(url, languages)
+            jobs.append(BatchItem(url=url, job_id=job_id, languages=languages))
+
+        return BatchAccepted(accepted=len(jobs), jobs=jobs, errors=errors)
 
     @app.get("/jobs/{job_id}", response_model=JobResponse)
     def get_job(job_id: str) -> JobResponse:

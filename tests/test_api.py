@@ -60,3 +60,35 @@ def test_get_job_returns_status():
 def test_get_unknown_job_404():
     client, _, _ = _client()
     assert client.get("/jobs/does-not-exist").status_code == 404
+
+
+def test_process_csv_creates_one_job_per_row():
+    client, store, pub = _client()
+    csv_content = (
+        "url,lang\n"
+        "http://yt/a,fr\n"
+        'http://yt/b,"fr,en"\n'
+        ",fr\n"  # empty url -> error, skipped
+    )
+    r = client.post(
+        "/process/csv",
+        files={"file": ("jobs.csv", csv_content.encode("utf-8"), "text/csv")},
+    )
+    assert r.status_code == 202
+    body = r.json()
+    assert body["accepted"] == 2
+    assert len(body["errors"]) == 1
+    assert len(store.jobs) == 2
+    assert len(pub.events) == 2
+    # multi-lang cell is parsed
+    langs = {tuple(item["languages"]) for item in body["jobs"]}
+    assert ("fr",) in langs and ("fr", "en") in langs
+
+
+def test_process_csv_rejects_missing_url_column():
+    client, _, _ = _client()
+    r = client.post(
+        "/process/csv",
+        files={"file": ("bad.csv", b"foo,bar\n1,2\n", "text/csv")},
+    )
+    assert r.status_code == 400

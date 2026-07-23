@@ -68,6 +68,29 @@ curl http://localhost:8000/jobs/<job_id>
 # -> status pending -> running -> completed (+ result_uri s3://...)
 ```
 
+### Ingestion par lot (CSV)
+
+Envoie un CSV (colonnes `url` + `lang`) pour créer un job par ligne :
+
+```bash
+curl -X POST http://localhost:8000/process/csv -F "file=@examples/jobs.csv"
+# -> {"accepted": 3, "jobs": [{"url":"...","job_id":"...","languages":["fr"]}, ...], "errors": []}
+```
+
+Format du CSV (`examples/jobs.csv`) :
+
+```csv
+url,lang
+https://www.youtube.com/watch?v=LM7rtFJcnG8,fr
+https://youtu.be/PCE-UjHZRs0,ar
+https://www.youtube.com/watch?v=x5ppD9fMjag,"fr,en"
+```
+
+- Colonne `url` obligatoire ; `lang` optionnelle (défaut = `TOUMAI_LANGUAGES`).
+- Plusieurs langues dans une cellule : `"fr,en"` ou `fr;en`.
+- Les lignes sans `url` sont ignorées et listées dans `errors`.
+- Chaque ligne valide → un job publié sur Kafka, traité par les workers.
+
 Doc interactive : http://localhost:8000/docs (Swagger UI).
 
 ## Table `jobs`

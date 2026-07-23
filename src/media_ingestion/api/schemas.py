@@ -17,6 +17,18 @@ class ProcessAccepted(BaseModel):
     status: str
 
 
+class BatchItem(BaseModel):
+    url: str
+    job_id: str
+    languages: list[str]
+
+
+class BatchAccepted(BaseModel):
+    accepted: int
+    jobs: list[BatchItem]
+    errors: list[str] = []
+
+
 class JobResponse(BaseModel):
     job_id: str
     url: str
