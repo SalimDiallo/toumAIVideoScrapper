@@ -31,6 +31,16 @@ class SpeechToTextPort(Protocol):
 
 
 class StoragePort(Protocol):
-    def save(self, result: IngestionResult, language: str) -> Path:
-        """Persist the result under a per-language folder; return where it was written."""
+    def save(self, result: IngestionResult, language: str) -> str:
+        """Persist the result (audio + json), grouped by language.
+
+        Returns a storage location (local path or an s3:// URI) — the caller
+        treats it as an opaque string, so local disk and MinIO are interchangeable.
+        """
+        ...
+
+
+class MetadataRepositoryPort(Protocol):
+    def upsert(self, result: IngestionResult, language: str, storage_uri: str) -> None:
+        """Index the ingested video in a catalog (e.g. Postgres). Idempotent per video_id."""
         ...

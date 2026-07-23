@@ -16,7 +16,32 @@ from .adapters.youtube_transcript import YouTubeTranscriptProvider
 from .adapters.ytdlp_downloader import YtDlpDownloader
 from .application.ingest_video import IngestVideoUseCase
 from .config import Settings
+from .domain.ports import MetadataRepositoryPort, StoragePort
 from .logging_setup import configure_logging
+
+
+def _build_storage(settings: Settings) -> StoragePort:
+    if settings.storage_backend == "minio":
+        from .adapters.minio_storage import MinioStorage
+
+        return MinioStorage(
+            endpoint=settings.minio_endpoint,
+            access_key=settings.minio_access_key,
+            secret_key=settings.minio_secret_key,
+            bucket=settings.minio_bucket,
+            secure=settings.minio_secure,
+        )
+    return LocalJsonStorage(root=settings.data_dir)
+
+
+def _build_metadata_repo(settings: Settings) -> MetadataRepositoryPort | None:
+    if settings.metadata_backend == "postgres":
+        from .adapters.postgres_repo import PostgresMetadataRepository
+
+        repo = PostgresMetadataRepository(dsn=settings.postgres_dsn)
+        repo.create_schema()
+        return repo
+    return None
 
 
 def build_use_case(settings: Settings) -> IngestVideoUseCase:
@@ -27,9 +52,13 @@ def build_use_case(settings: Settings) -> IngestVideoUseCase:
         downloader=YtDlpDownloader(
             audio_format=settings.audio_format, ffmpeg_location=settings.ffmpeg_location
         ),
-        transcript_provider=YouTubeTranscriptProvider(),
-        storage=LocalJsonStorage(root=settings.data_dir),
+        transcript_provider=YouTubeTranscriptProvider(
+            accept_asr=settings.accept_youtube_asr,
+            enable_translation=settings.enable_transcript_translation,
+        ),
+        storage=_build_storage(settings),
         stt=stt,
+        metadata_repo=_build_metadata_repo(settings),
     )
 
 

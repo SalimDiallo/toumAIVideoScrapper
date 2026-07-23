@@ -17,6 +17,7 @@ import structlog
 from ..domain.models import IngestionResult, TranscriptStatus
 from ..domain.ports import (
     AudioDownloaderPort,
+    MetadataRepositoryPort,
     SpeechToTextPort,
     StoragePort,
     TranscriptProviderPort,
@@ -31,6 +32,7 @@ class IngestVideoUseCase:
     transcript_provider: TranscriptProviderPort
     storage: StoragePort
     stt: SpeechToTextPort | None = None  # Phase 2: faster-whisper. None = skip.
+    metadata_repo: MetadataRepositoryPort | None = None  # Phase 2: Postgres catalog. None = skip.
 
     def execute(self, video_url: str, work_dir: Path, languages: list[str]) -> IngestionResult:
         metadata, audio = self.downloader.download(video_url, work_dir)
@@ -43,7 +45,7 @@ class IngestVideoUseCase:
             log.info(
                 "transcript.fetched",
                 video_id=metadata.video_id,
-                source="youtube",
+                source=transcript.source.value,
                 language=transcript.language,
                 segments=len(transcript.segments),
             )
@@ -66,8 +68,13 @@ class IngestVideoUseCase:
             transcript_status=status,
         )
         language = self._resolve_language(transcript, metadata, languages)
-        out = self.storage.save(result, language)
-        log.info("ingestion.saved", video_id=metadata.video_id, language=language, path=str(out))
+        storage_uri = self.storage.save(result, language)
+        log.info("ingestion.saved", video_id=metadata.video_id, language=language, uri=storage_uri)
+
+        if self.metadata_repo is not None:
+            self.metadata_repo.upsert(result, language, storage_uri)
+            log.info("metadata.indexed", video_id=metadata.video_id)
+
         return result
 
     @staticmethod

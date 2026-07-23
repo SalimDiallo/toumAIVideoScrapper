@@ -44,16 +44,16 @@ class FakeStorage:
         self.saved: IngestionResult | None = None
         self.language: str | None = None
 
-    def save(self, result: IngestionResult, language: str) -> Path:
+    def save(self, result: IngestionResult, language: str) -> str:
         self.saved = result
         self.language = language
-        return Path("/tmp") / language / result.metadata.video_id
+        return str(Path("/tmp") / language / result.metadata.video_id)
 
 
 def _yt_transcript() -> Transcript:
     return Transcript(
         language="fr",
-        source=TranscriptSource.YOUTUBE,
+        source=TranscriptSource.YOUTUBE_MANUAL,
         segments=[TranscriptSegment(0.0, 2.0, "bonjour"), TranscriptSegment(2.0, 2.0, "monde")],
     )
 
@@ -66,7 +66,7 @@ def test_uses_youtube_transcript_when_available(tmp_path):
 
     assert result.transcript_status is TranscriptStatus.AVAILABLE
     assert result.transcript is not None
-    assert result.transcript.source is TranscriptSource.YOUTUBE
+    assert result.transcript.source is TranscriptSource.YOUTUBE_MANUAL
     assert result.transcript.text == "bonjour monde"
     assert storage.language == "fr"  # grouped under data/fr/...
 
@@ -90,3 +90,22 @@ def test_falls_back_to_stt_when_wired(tmp_path):
     assert result.transcript is not None
     assert result.transcript.source is TranscriptSource.STT
     assert result.transcript_status is TranscriptStatus.AVAILABLE
+
+
+def test_metadata_repo_is_called_with_storage_uri(tmp_path):
+    class FakeRepo:
+        def __init__(self):
+            self.calls: list[tuple] = []
+
+        def upsert(self, result, language, storage_uri):
+            self.calls.append((result.metadata.video_id, language, storage_uri))
+
+    storage = FakeStorage()
+    repo = FakeRepo()
+    uc = IngestVideoUseCase(
+        FakeDownloader(), FakeTranscriptProvider(_yt_transcript()), storage, metadata_repo=repo
+    )
+
+    uc.execute("http://yt/x", tmp_path, ["fr"])
+
+    assert repo.calls == [("vid123", "fr", str(Path("/tmp") / "fr" / "vid123"))]
