@@ -36,7 +36,24 @@ Le use case ne dépend **que des ports**. Passer à MinIO/Kafka = écrire un nou
 - Python 3.13
 - **ffmpeg** sur le PATH (extraction audio par yt-dlp)
 
-## Installation
+## Raccourcis (Makefile)
+
+Depuis **Git Bash** (`make` installé) :
+
+```bash
+make            # liste toutes les commandes
+make install    # venv + dépendances
+make up         # infra : postgres + minio + kafka
+make api        # API FastAPI (terminal 1) -> http://localhost:8000/docs
+make worker     # worker Kafka (terminal 2)
+make ingest URL="https://youtu.be/xxxx" LANGS=fr
+make airflow-up # Airflow -> http://localhost:8080 (admin/admin)
+make test       # tests
+```
+
+> `make` n'est pas natif sous Windows : `winget install ezwinports.make`, puis rouvrir le terminal.
+
+## Installation (manuel)
 
 ```bash
 python -m venv .venv
