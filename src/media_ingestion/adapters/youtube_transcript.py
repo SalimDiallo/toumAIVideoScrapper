@@ -16,8 +16,8 @@ the available tracks and picks the most trustworthy one, in this order:
   5. translate any track into a preferred language (only if enable_translation=True)
 
 Returns None when nothing acceptable is found (transcripts disabled, none exist,
-only ASR while ASR is refused, or a network error). The use case then decides
-what to do next (fall back to STT, or mark unavailable).
+only ASR while ASR is refused, or a network error). The use case then marks the
+video as unavailable.
 
 Supports both the 1.x instance API (`list`/`fetch`) and the legacy 0.6.x static API.
 """
@@ -34,8 +34,8 @@ log = structlog.get_logger(__name__)
 
 class YouTubeTranscriptProvider:
     def __init__(self, *, accept_asr: bool = True, enable_translation: bool = False) -> None:
-        # Accept YouTube's auto-generated captions. Turn off to route ASR-only
-        # videos to our own STT instead (often better than YouTube ASR).
+        # Accept YouTube's auto-generated captions. Turn off to mark ASR-only
+        # videos as unavailable instead of using YouTube ASR.
         self._accept_asr = accept_asr
         # Machine-translate an existing track as a last resort.
         self._enable_translation = enable_translation

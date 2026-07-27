@@ -66,7 +66,7 @@ def test_falls_back_to_asr_when_no_manual(monkeypatch):
 def test_rejects_asr_when_disabled(monkeypatch):
     _install(monkeypatch, [FakeTrack("fr", is_generated=True)])
     t = YouTubeTranscriptProvider(accept_asr=False).fetch("vid", ["fr"])
-    assert t is None  # -> caller routes to STT
+    assert t is None  # -> caller marks the video unavailable
 
 
 def test_language_preference_order(monkeypatch):

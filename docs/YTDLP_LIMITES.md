@@ -2,7 +2,7 @@
 
 Limites de **yt-dlp** (l'outil, pas notre code) qui comptent pour un pipeline à l'échelle.
 Statut : **connu / accepté pour le MVP**. Les garde-fous seront ajoutés plus tard (Phase 2,
-couche workers + orchestration Kafka/Airflow).
+couche workers + file Kafka).
 
 > Priorité des vrais murs à l'échelle : **#2 anti-bot**, **#3 rate-limit IP**, **#1 fragilité/màj**.
 
@@ -82,4 +82,4 @@ pas dans yt-dlp lui-même.
 | Débit / volume      | parallélisme via workers (Kafka), pas via yt-dlp             |
 | Conformité          | cadrage usage + traçabilité                                  |
 
-Ces parades vivent naturellement dans la couche **workers + Kafka/Airflow** de la Phase 2.
+Ces parades vivent naturellement dans la couche **workers + Kafka** de la Phase 2.

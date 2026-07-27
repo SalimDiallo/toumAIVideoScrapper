@@ -1,7 +1,7 @@
 """Ports (interfaces). Adapters implement these; the use case depends only on them.
 
-This is what makes Phase 2 cheap: swapping local disk for MinIO, or plugging a
-faster-whisper STT engine, means writing a new adapter — the use case never changes.
+This is what makes Phase 2 cheap: swapping local disk for MinIO means writing a
+new adapter — the use case never changes.
 """
 
 from __future__ import annotations
@@ -24,12 +24,6 @@ class TranscriptProviderPort(Protocol):
         ...
 
 
-class SpeechToTextPort(Protocol):
-    def transcribe(self, audio: AudioAsset, language: str | None = None) -> Transcript:
-        """Generate a transcript from audio (Phase 2, e.g. faster-whisper)."""
-        ...
-
-
 class StoragePort(Protocol):
     def save(self, result: IngestionResult, language: str) -> str:
         """Persist the result (audio + json), grouped by language.
@@ -39,16 +33,28 @@ class StoragePort(Protocol):
         """
         ...
 
+    def load_transcript(self, storage_uri: str) -> dict | None:
+        """Read back the transcript.json at a storage location, or None if absent."""
+        ...
+
 
 class MetadataRepositoryPort(Protocol):
     def upsert(self, result: IngestionResult, language: str, storage_uri: str) -> None:
         """Index the ingested video in a catalog (e.g. Postgres). Idempotent per video_id."""
         ...
 
+    def list(self, *, language: str | None = None, limit: int = 50, offset: int = 0) -> list[dict]:
+        """List catalog rows, most recent first, optionally filtered by language."""
+        ...
+
 
 class EventPublisherPort(Protocol):
     def publish(self, topic: str, key: str, event: dict) -> None:
-        """Publish an event (e.g. to Kafka). Decouples the API from the workers."""
+        """Publish one event (e.g. to Kafka). Decouples the API from the workers."""
+        ...
+
+    def publish_batch(self, topic: str, items: list[tuple[str, dict]]) -> None:
+        """Publish many (key, event) pairs efficiently (single flush). Non per-message blocking."""
         ...
 
 
@@ -58,6 +64,12 @@ class JobStorePort(Protocol):
         ...
 
     def get(self, job_id: str) -> Job | None:
+        ...
+
+    def list(
+        self, *, status: JobStatus | None = None, limit: int = 50, offset: int = 0
+    ) -> list[Job]:
+        """List jobs, most recent first, optionally filtered by status."""
         ...
 
     def update_status(

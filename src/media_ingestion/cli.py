@@ -1,7 +1,7 @@
 """CLI entry point: `toumai-ingest <youtube_url> [--lang fr en] ...`
 
 This wires the concrete adapters into the use case. In Phase 2 the same
-use case is driven by a Kafka worker / Airflow task instead of this CLI.
+use case is driven by a Kafka worker instead of this CLI.
 """
 
 from __future__ import annotations
@@ -10,8 +10,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from .adapters.faster_whisper_stt import FasterWhisperStt
 from .adapters.local_storage import LocalJsonStorage
+from .adapters.rate_limited_downloader import RateLimitedDownloader
 from .adapters.youtube_transcript import YouTubeTranscriptProvider
 from .adapters.ytdlp_downloader import YtDlpDownloader
 from .application.ingest_video import IngestVideoUseCase
@@ -44,20 +44,30 @@ def _build_metadata_repo(settings: Settings) -> MetadataRepositoryPort | None:
     return None
 
 
+def _build_downloader(settings: Settings) -> RateLimitedDownloader:
+    """yt-dlp enveloppé de la couche throttling (délais + backoff 429 + proxies)."""
+    inner = YtDlpDownloader(
+        audio_format=settings.audio_format, ffmpeg_location=settings.ffmpeg_location
+    )
+    return RateLimitedDownloader(
+        inner,
+        delay_min_s=settings.download_delay_min_s,
+        delay_max_s=settings.download_delay_max_s,
+        max_retries=settings.download_max_retries,
+        backoff_base_s=settings.download_backoff_base_s,
+        backoff_max_s=settings.download_backoff_max_s,
+        proxies=settings.download_proxies,
+    )
+
+
 def build_use_case(settings: Settings) -> IngestVideoUseCase:
-    stt = None
-    if settings.enable_stt:
-        stt = FasterWhisperStt(model_size=settings.stt_model_size, device=settings.stt_device)
     return IngestVideoUseCase(
-        downloader=YtDlpDownloader(
-            audio_format=settings.audio_format, ffmpeg_location=settings.ffmpeg_location
-        ),
+        downloader=_build_downloader(settings),
         transcript_provider=YouTubeTranscriptProvider(
             accept_asr=settings.accept_youtube_asr,
             enable_translation=settings.enable_transcript_translation,
         ),
         storage=_build_storage(settings),
-        stt=stt,
         metadata_repo=_build_metadata_repo(settings),
     )
 

@@ -3,7 +3,7 @@
 Flow:
   1. download audio + metadata (yt-dlp)
   2. try to fetch YouTube captions
-  3. if none: use STT if wired, otherwise skip (status = unavailable)
+  3. if none: skip (status = unavailable)
   4. persist the result
 """
 
@@ -18,7 +18,6 @@ from ..domain.models import IngestionResult, TranscriptStatus
 from ..domain.ports import (
     AudioDownloaderPort,
     MetadataRepositoryPort,
-    SpeechToTextPort,
     StoragePort,
     TranscriptProviderPort,
 )
@@ -31,7 +30,6 @@ class IngestVideoUseCase:
     downloader: AudioDownloaderPort
     transcript_provider: TranscriptProviderPort
     storage: StoragePort
-    stt: SpeechToTextPort | None = None  # Phase 2: faster-whisper. None = skip.
     metadata_repo: MetadataRepositoryPort | None = None  # Phase 2: Postgres catalog. None = skip.
 
     def execute(self, video_url: str, work_dir: Path, languages: list[str]) -> IngestionResult:
@@ -49,16 +47,12 @@ class IngestVideoUseCase:
                 language=transcript.language,
                 segments=len(transcript.segments),
             )
-        elif self.stt is not None:
-            transcript = self.stt.transcribe(audio, metadata.language)
-            status = TranscriptStatus.AVAILABLE
-            log.info("transcript.generated", video_id=metadata.video_id, source="stt")
         else:
             status = TranscriptStatus.UNAVAILABLE
             log.info(
                 "transcript.skipped",
                 video_id=metadata.video_id,
-                reason="no_youtube_captions_and_no_stt",
+                reason="no_youtube_captions",
             )
 
         result = IngestionResult(

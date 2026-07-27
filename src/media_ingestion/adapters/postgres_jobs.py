@@ -65,8 +65,20 @@ class PostgresJobStore:
     def get(self, job_id: str) -> Job | None:
         with self._engine.connect() as conn:
             row = conn.execute(select(jobs).where(jobs.c.job_id == job_id)).mappings().first()
-        if row is None:
-            return None
+        return self._to_job(row) if row is not None else None
+
+    def list(
+        self, *, status: JobStatus | None = None, limit: int = 50, offset: int = 0
+    ) -> list[Job]:
+        stmt = select(jobs).order_by(jobs.c.created_at.desc()).limit(limit).offset(offset)
+        if status is not None:
+            stmt = stmt.where(jobs.c.status == status.value)
+        with self._engine.connect() as conn:
+            rows = conn.execute(stmt).mappings().all()
+        return [self._to_job(r) for r in rows]
+
+    @staticmethod
+    def _to_job(row) -> Job:
         return Job(
             job_id=row["job_id"],
             url=row["url"],

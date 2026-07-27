@@ -35,6 +35,12 @@ class LocalJsonStorage:
             )
         return str(out_dir)
 
+    def load_transcript(self, storage_uri: str) -> dict | None:
+        path = Path(storage_uri) / "transcript.json"
+        if not path.exists():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+
     @staticmethod
     def _relocate_audio(src: Path, out_dir: Path) -> Path:
         """Move the downloaded audio into the video folder. Returns final path."""

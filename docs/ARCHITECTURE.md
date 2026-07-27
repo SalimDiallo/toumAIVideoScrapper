@@ -51,12 +51,11 @@ vient de yt-dlp ou que le stockage est du disque. Il ne connaît que des **inter
 | ----------------------- | ---------------------------------------------------- |
 | `AudioDownloaderPort`   | `download(url) -> (metadata, audio)`                 |
 | `TranscriptProviderPort`| `fetch(video_id, langues) -> Transcript \| None`     |
-| `SpeechToTextPort`      | `transcribe(audio) -> Transcript` (débranché, Phase 2)|
 | `StoragePort`           | `save(result, langue) -> chemin`                     |
 
 **Bénéfice concret pour le scale (Phase 2) :** remplacer le disque par MinIO = écrire un
 nouvel adapter `MinioStorage` avec la même méthode `save()`. Le use-case ne change pas une
-ligne. Idem pour brancher faster-whisper sur le port STT. C'est ça qui rend l'évolution peu coûteuse.
+ligne. C'est ça qui rend l'évolution peu coûteuse.
 
 ---
 
@@ -73,7 +72,6 @@ cli.py
         2. transcript_provider.fetch()   → sous-titres YouTube ? -> Transcript ou None
         3. décision :
              transcript trouvé        → status = available
-             sinon + STT branché      → transcribe()  (Phase 2, désactivé)
              sinon                     → status = unavailable (on ne transcrit pas)
         4. résout la langue du dossier
         5. storage.save(result, langue) → écrit metadata.json (+ transcript.json)
@@ -110,7 +108,7 @@ if has_ffmpeg:
 ```
 - Un **post-processeur** tourne *après* le téléchargement. `FFmpegExtractAudio` ré-encode le
   `.webm`/`.m4a` en `.wav`. Ça **exige ffmpeg** (l'outil qui décode/réencode l'audio).
-- **Pourquoi wav ?** Pour la Phase 2 STT : faster-whisper préfère du PCM propre (wav 16 kHz mono).
+- **Pourquoi wav ?** Format PCM propre, stable pour un traitement audio ultérieur.
 
 ### c) Le fallback qu'on a codé (panne ffmpeg)
 ```python
@@ -194,7 +192,6 @@ ou via `.env`, avec des défauts sains :
 | `TOUMAI_AUDIO_FORMAT`    | format cible si ffmpeg présent         | `wav`        |
 | `TOUMAI_LANGUAGES`       | langues de sous-titres préférées       | `["fr","en"]`|
 | `TOUMAI_FFMPEG_LOCATION` | dossier bin de ffmpeg (si pas au PATH) | `None`       |
-| `TOUMAI_ENABLE_STT`      | activer faster-whisper (Phase 2)       | `false`      |
 
 Aucune valeur en dur = « config-driven », indispensable pour l'industrialisation Phase 2.
 
@@ -204,16 +201,15 @@ Aucune valeur en dur = « config-driven », indispensable pour l'industrialisati
 
 - **Séquentiel**, une vidéo par commande (la file d'attente = Kafka, Phase 2).
 - Audio en `.webm` tant que ffmpeg n'est pas dans le PATH (l'installer pour du `.wav`).
-- Stockage disque local (→ MinIO), pas de base de données (→ Postgres), pas d'idempotence/
-  reprise (→ Airflow).
-- STT débranché : le port existe, l'adapter faster-whisper est un placeholder prêt à coder.
+- Stockage disque local (→ MinIO), pas de base de données (→ Postgres), reprise gérée
+  par la file Kafka + DLQ.
+- Transcription limitée aux sous-titres YouTube : sans piste dispo, la vidéo est `unavailable`.
 
 ---
 
 ## 9. Roadmap Phase 2
 
-- **Kafka** : mise en file des vidéos (`job.requested`, `step.completed`, DLQ).
-- **Airflow** : orchestration, retry/SLA/reprise, ordre des étapes.
+- **Kafka** : mise en file des vidéos (`job.requested`, `job.completed`, DLQ) + workers parallèles.
 - **MinIO** : stockage medallion (Bronze brut / Silver Parquet / Gold), + **Postgres**,
   **Elasticsearch**, **Qdrant**.
 - **FastAPI** : `POST /process` → `202 + job_id`, suivi via `GET /jobs/{id}`.

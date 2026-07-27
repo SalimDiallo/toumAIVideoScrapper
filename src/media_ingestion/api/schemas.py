@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class ProcessRequest(BaseModel):
@@ -38,3 +38,19 @@ class JobResponse(BaseModel):
     error: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class VideoItem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    video_id: str
+    url: str
+    title: str | None = None
+    channel: str | None = None
+    duration_s: int | None = None
+    upload_date: str | None = None
+    language: str | None = None
+    transcript_status: str | None = None
+    transcript_source: str | None = None
+    storage_uri: str | None = None
+    created_at: datetime | None = None

@@ -30,15 +30,6 @@ class FakeTranscriptProvider:
         return self._transcript
 
 
-class FakeStt:
-    def transcribe(self, audio: AudioAsset, language: str | None = None) -> Transcript:
-        return Transcript(
-            language=language or "fr",
-            source=TranscriptSource.STT,
-            segments=[TranscriptSegment(0.0, 1.0, "from stt")],
-        )
-
-
 class FakeStorage:
     def __init__(self):
         self.saved: IngestionResult | None = None
@@ -71,7 +62,7 @@ def test_uses_youtube_transcript_when_available(tmp_path):
     assert storage.language == "fr"  # grouped under data/fr/...
 
 
-def test_skips_transcript_when_none_and_no_stt(tmp_path):
+def test_skips_transcript_when_none(tmp_path):
     storage = FakeStorage()
     uc = IngestVideoUseCase(FakeDownloader(), FakeTranscriptProvider(None), storage)
 
@@ -79,17 +70,6 @@ def test_skips_transcript_when_none_and_no_stt(tmp_path):
 
     assert result.transcript is None
     assert result.transcript_status is TranscriptStatus.UNAVAILABLE
-
-
-def test_falls_back_to_stt_when_wired(tmp_path):
-    storage = FakeStorage()
-    uc = IngestVideoUseCase(FakeDownloader(), FakeTranscriptProvider(None), storage, stt=FakeStt())
-
-    result = uc.execute("http://yt/x", tmp_path, ["fr"])
-
-    assert result.transcript is not None
-    assert result.transcript.source is TranscriptSource.STT
-    assert result.transcript_status is TranscriptStatus.AVAILABLE
 
 
 def test_metadata_repo_is_called_with_storage_uri(tmp_path):

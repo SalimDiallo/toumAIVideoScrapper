@@ -10,13 +10,25 @@ import csv
 import io
 import uuid
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 
-from ..bootstrap import build_job_store, build_publisher
+from ..bootstrap import build_catalog, build_job_store, build_publisher
 from ..config import Settings
-from ..domain.models import Job
-from ..domain.ports import EventPublisherPort, JobStorePort
-from .schemas import BatchAccepted, BatchItem, JobResponse, ProcessAccepted, ProcessRequest
+from ..domain.models import Job, JobStatus
+from ..domain.ports import (
+    EventPublisherPort,
+    JobStorePort,
+    MetadataRepositoryPort,
+    StoragePort,
+)
+from .schemas import (
+    BatchAccepted,
+    BatchItem,
+    JobResponse,
+    ProcessAccepted,
+    ProcessRequest,
+    VideoItem,
+)
 
 
 def _parse_languages(raw: str | None, default: list[str]) -> list[str]:
@@ -26,29 +38,45 @@ def _parse_languages(raw: str | None, default: list[str]) -> list[str]:
     return [p for p in parts if p] or list(default)
 
 
+def _job_to_response(job: Job) -> JobResponse:
+    return JobResponse(
+        job_id=job.job_id,
+        url=job.url,
+        languages=job.languages,
+        status=job.status.value,
+        result_uri=job.result_uri,
+        error=job.error,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
+
+
 def create_app(
     settings: Settings | None = None,
     *,
     store: JobStorePort | None = None,
     publisher: EventPublisherPort | None = None,
+    storage: StoragePort | None = None,
+    catalog: MetadataRepositoryPort | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     store = store or build_job_store(settings)
     publisher = publisher or build_publisher(settings)
 
-    app = FastAPI(title="TOUMAI Ingestion API", version="0.1.0")
+    app = FastAPI(title="Ingestion API", version="0.1.0")
 
-    def _submit(url: str, languages: list[str]) -> str:
-        """Create a PENDING job and publish job.requested. Returns the job_id."""
+    def _get_storage() -> StoragePort:
+        from ..cli import _build_storage
+
+        return storage or _build_storage(settings)
+
+    def _get_catalog() -> MetadataRepositoryPort:
+        return catalog or build_catalog(settings)
+
+    def _new_job_event(url: str, languages: list[str]) -> tuple[str, dict]:
         job_id = uuid.uuid4().hex
-        job = Job(job_id=job_id, url=url, languages=languages)
-        store.create(job)
-        publisher.publish(
-            settings.topic_job_requested,
-            key=job_id,
-            event={"job_id": job_id, "url": url, "languages": languages},
-        )
-        return job_id
+        store.create(Job(job_id=job_id, url=url, languages=languages))
+        return job_id, {"job_id": job_id, "url": url, "languages": languages}
 
     @app.get("/health")
     def health() -> dict:
@@ -57,7 +85,8 @@ def create_app(
     @app.post("/process", status_code=202, response_model=ProcessAccepted)
     def process(req: ProcessRequest) -> ProcessAccepted:
         languages = req.languages or list(settings.languages)
-        job_id = _submit(req.url, languages)
+        job_id, event = _new_job_event(req.url, languages)
+        publisher.publish(settings.topic_job_requested, key=job_id, event=event)
         return ProcessAccepted(job_id=job_id, status="pending")
 
     @app.post("/process/csv", status_code=202, response_model=BatchAccepted)
@@ -69,6 +98,7 @@ def create_app(
 
         jobs: list[BatchItem] = []
         errors: list[str] = []
+        events: list[tuple[str, dict]] = []
         for i, row in enumerate(reader, start=2):  # row 1 = header
             norm = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
             url = norm.get("url", "")
@@ -76,26 +106,69 @@ def create_app(
                 errors.append(f"line {i}: empty url")
                 continue
             languages = _parse_languages(norm.get("lang") or norm.get("languages"), settings.languages)
-            job_id = _submit(url, languages)
+            job_id, event = _new_job_event(url, languages)
+            events.append((job_id, event))
             jobs.append(BatchItem(url=url, job_id=job_id, languages=languages))
 
+        # publish all at once (single flush) instead of blocking per message
+        publisher.publish_batch(settings.topic_job_requested, events)
         return BatchAccepted(accepted=len(jobs), jobs=jobs, errors=errors)
+
+    @app.get("/jobs", response_model=list[JobResponse])
+    def list_jobs(
+        status: str | None = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
+    ) -> list[JobResponse]:
+        status_enum = None
+        if status is not None:
+            try:
+                status_enum = JobStatus(status)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"invalid status: {status}")
+        jobs = store.list(status=status_enum, limit=limit, offset=offset)
+        return [_job_to_response(j) for j in jobs]
 
     @app.get("/jobs/{job_id}", response_model=JobResponse)
     def get_job(job_id: str) -> JobResponse:
         job = store.get(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="job not found")
-        return JobResponse(
-            job_id=job.job_id,
-            url=job.url,
-            languages=job.languages,
-            status=job.status.value,
-            result_uri=job.result_uri,
-            error=job.error,
-            created_at=job.created_at,
-            updated_at=job.updated_at,
+        return _job_to_response(job)
+
+    @app.get("/jobs/{job_id}/transcript")
+    def get_job_transcript(job_id: str) -> dict:
+        job = store.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        if not job.result_uri:
+            raise HTTPException(status_code=409, detail=f"job not finished (status={job.status.value})")
+        transcript = _get_storage().load_transcript(job.result_uri)
+        if transcript is None:
+            raise HTTPException(status_code=404, detail="no transcript for this video")
+        return transcript
+
+    @app.post("/jobs/{job_id}/retry", status_code=202, response_model=ProcessAccepted)
+    def retry_job(job_id: str) -> ProcessAccepted:
+        job = store.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        store.update_status(job_id, JobStatus.PENDING)
+        publisher.publish(
+            settings.topic_job_requested,
+            key=job_id,
+            event={"job_id": job_id, "url": job.url, "languages": job.languages},
         )
+        return ProcessAccepted(job_id=job_id, status="pending")
+
+    @app.get("/videos", response_model=list[VideoItem])
+    def list_videos(
+        language: str | None = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
+    ) -> list[VideoItem]:
+        rows = _get_catalog().list(language=language, limit=limit, offset=offset)
+        return [VideoItem(**row) for row in rows]
 
     return app
 

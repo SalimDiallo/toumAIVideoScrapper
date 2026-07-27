@@ -16,6 +16,7 @@ from sqlalchemy import (
     Table,
     Text,
     create_engine,
+    select,
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -72,3 +73,11 @@ class PostgresMetadataRepository:
         )
         with self._engine.begin() as conn:
             conn.execute(stmt)
+
+    def list(self, *, language: str | None = None, limit: int = 50, offset: int = 0) -> list[dict]:
+        stmt = select(videos).order_by(videos.c.created_at.desc()).limit(limit).offset(offset)
+        if language is not None:
+            stmt = stmt.where(videos.c.language == language)
+        with self._engine.connect() as conn:
+            rows = conn.execute(stmt).mappings().all()
+        return [dict(r) for r in rows]

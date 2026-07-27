@@ -14,8 +14,7 @@ COMPOSE := docker compose
 LANGS ?= fr
 
 .DEFAULT_GOAL := help
-.PHONY: help install test lint fmt up down ps logs api worker ingest \
-        airflow-up airflow-down airflow-logs clean
+.PHONY: help install test lint fmt up down ps logs api worker ingest clean
 
 help: ## Affiche cette aide
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -52,7 +51,7 @@ logs: ## Suit les logs de l'infra
 	$(COMPOSE) logs -f
 
 clean: ## Arrête tout et supprime les volumes (⚠ données)
-	$(COMPOSE) --profile airflow down -v
+	$(COMPOSE) down -v
 
 # --- Application ----------------------------------------------------------
 api: ## Lance l'API FastAPI (http://localhost:8000/docs)
@@ -64,13 +63,3 @@ worker: ## Lance un worker Kafka
 ingest: ## Ingestion directe en CLI (URL=... [LANGS=fr])
 	@if [ -z "$(URL)" ]; then echo "Usage: make ingest URL=\"https://youtu.be/xxxx\" [LANGS=fr]"; exit 1; fi
 	$(VENV)/toumai-ingest.exe "$(URL)" --lang $(LANGS)
-
-# --- Airflow (profile) ----------------------------------------------------
-airflow-up: ## Démarre Airflow (UI http://localhost:8080, admin/admin)
-	$(COMPOSE) --profile airflow up -d
-
-airflow-down: ## Arrête Airflow
-	$(COMPOSE) --profile airflow down
-
-airflow-logs: ## Suit les logs du scheduler Airflow
-	$(COMPOSE) --profile airflow logs -f airflow-scheduler

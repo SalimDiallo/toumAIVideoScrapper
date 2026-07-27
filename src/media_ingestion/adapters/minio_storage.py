@@ -61,6 +61,20 @@ class MinioStorage:
         log.info("minio.saved", uri=uri)
         return uri
 
+    def load_transcript(self, storage_uri: str) -> dict | None:
+        # storage_uri: s3://<bucket>/<prefix>
+        prefix = storage_uri.split(f"s3://{self._bucket}/", 1)[-1]
+        key = f"{prefix}/transcript.json"
+        try:
+            response = self._client.get_object(self._bucket, key)
+            try:
+                return json.loads(response.read().decode("utf-8"))
+            finally:
+                response.close()
+                response.release_conn()
+        except Exception:  # noqa: BLE001 - object missing / no such key
+            return None
+
     def _put_json(self, key: str, obj: dict) -> None:
         data = json.dumps(obj, ensure_ascii=False, indent=2).encode("utf-8")
         self._client.put_object(
