@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block heading %}Upload{% endblock %}
+{% block content %}
+
+<div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+  <!-- URL unique -->
+  <div class="rounded-xl border border-slate-200 bg-white p-6">
+    <h2 class="font-semibold text-slate-800">Soumettre une URL</h2>
+    <p class="mt-1 text-sm text-slate-500">Ajoute une vidéo à la file d'ingestion.</p>
+    <form hx-post="/ui/process" hx-target="#url-flash" hx-swap="innerHTML" hx-on::after-request="if(event.detail.successful) this.reset()" class="mt-4 space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-slate-700">URL de la vidéo</label>
+        <input name="url" type="text" required placeholder="https://www.youtube.com/watch?v=…"
+               class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-[#018B96] focus:ring-[#018B96]">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-700">Langues <span class="text-slate-400 font-normal">(optionnel)</span></label>
+        <input name="languages" type="text" placeholder="{{ default_langs }}"
+               class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-[#018B96] focus:ring-[#018B96]">
+      </div>
+      <button class="w-full rounded-lg bg-[#018B96] px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">Lancer l'ingestion</button>
+    </form>
+    <div id="url-flash" class="mt-4"></div>
+  </div>
+
+  <!-- CSV lot -->
+  <div class="rounded-xl border border-slate-200 bg-white p-6">
+    <h2 class="font-semibold text-slate-800">Import CSV (lot)</h2>
+    <p class="mt-1 text-sm text-slate-500">Fichier avec une colonne <code class="rounded bg-slate-100 px-1">url</code> (et optionnellement <code class="rounded bg-slate-100 px-1">lang</code>).</p>
+    <form hx-post="/ui/process/csv" hx-target="#csv-flash" hx-swap="innerHTML" hx-encoding="multipart/form-data" class="mt-4 space-y-4">
+      <label class="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 px-6 py-8 text-center hover:border-slate-400">
+        <svg class="h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/></svg>
+        <span class="mt-2 text-sm text-slate-600">Choisir un fichier CSV</span>
+        <input name="file" type="file" accept=".csv,text/csv" required class="mt-2 text-xs text-slate-500 file:mr-3 file:rounded-md file:border-0 file:bg-[#018B96] file:px-3 file:py-1.5 file:text-white">
+      </label>
+      <button class="w-full rounded-lg bg-[#018B96] px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">Importer le lot</button>
+    </form>
+    <div id="csv-flash" class="mt-4"></div>
+  </div>
+</div>
+{% endblock %}

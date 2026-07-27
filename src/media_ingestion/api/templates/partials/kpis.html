@@ -1,0 +1,15 @@
+<div class="grid grid-cols-2 gap-4 lg:grid-cols-5">
+  <div class="rounded-xl border border-slate-200 bg-white p-4">
+    <div class="text-xs font-medium uppercase tracking-wide text-slate-400">Total jobs</div>
+    <div class="mt-1 text-2xl font-semibold text-[#018B96]">{{ kpis.total }}</div>
+  </div>
+  {% for s in STATUS_ORDER %}
+  {% set m = STATUS_META[s] %}
+  <div class="rounded-xl border border-slate-200 bg-white p-4">
+    <div class="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400">
+      <span class="h-2 w-2 rounded-full {{ m.dot }}"></span>{{ m.label }}
+    </div>
+    <div class="mt-1 text-2xl font-semibold text-[#018B96]">{{ kpis.counts[s] }}</div>
+  </div>
+  {% endfor %}
+</div>

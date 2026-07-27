@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block heading %}Jobs{% endblock %}
+{% block content %}
+
+<div id="kpis" hx-get="/ui/partials/kpis" hx-trigger="every 5s" hx-swap="innerHTML">
+  {% include "partials/kpis.html" %}
+</div>
+
+<div class="mt-6 flex flex-wrap items-center gap-2">
+  <a href="/ui/jobs" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if not status %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Tous</a>
+  {% for s in STATUS_ORDER %}
+  {% set m = STATUS_META[s] %}
+  <a href="/ui/jobs?status={{ s }}" class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium {% if status == s %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">
+    <span class="h-1.5 w-1.5 rounded-full {{ m.dot }}"></span>{{ m.label }}
+  </a>
+  {% endfor %}
+</div>
+
+<div class="mt-4 rounded-xl border border-slate-200 bg-white">
+  <div class="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3">
+    <span id="jobselcount" class="text-sm text-slate-500">0 sélectionné(s)</span>
+    <button id="jobbulkdel" type="button" disabled
+            hx-post="/ui/jobs/bulk-delete?status={{ status or '' }}&selectable=1"
+            hx-include=".jobcb:checked" hx-target="#jobs-tbody" hx-swap="innerHTML"
+            hx-confirm="Supprimer les jobs sélectionnés ? Action irréversible."
+            class="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-rose-200 px-3 py-1.5 text-sm font-medium text-rose-600 enabled:hover:bg-rose-50 disabled:opacity-40">
+      🗑 Supprimer la sélection
+    </button>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="text-left text-xs uppercase tracking-wide text-slate-400">
+        <tr class="border-b border-slate-100">
+          <th class="px-4 py-3"><input id="jobselectall" type="checkbox" class="h-4 w-4 rounded border-slate-300"></th>
+          <th class="px-4 py-3 font-medium">Vidéo</th><th class="px-4 py-3 font-medium">Langues</th>
+          <th class="px-4 py-3 font-medium">Statut</th><th class="px-4 py-3 font-medium">Erreur</th>
+          <th class="px-4 py-3 font-medium">Créé</th><th class="px-4 py-3 font-medium">MàJ</th>
+          <th class="px-4 py-3 text-right font-medium">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="jobs-tbody"
+             hx-get="/ui/partials/jobs-rows?selectable=1{% if status %}&status={{ status }}{% endif %}"
+             hx-trigger="load, every 5s" hx-swap="innerHTML">
+        <tr><td colspan="8" class="px-4 py-12 text-center text-sm text-slate-400">Chargement…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Selection survives the 5s auto-refresh: we keep the checked ids in a Set
+  // and re-apply them after every HTMX swap of the table body.
+  const selected = new Set();
+  const selectall = document.getElementById('jobselectall');
+  const bulkBtn = document.getElementById('jobbulkdel');
+  const count = document.getElementById('jobselcount');
+  const boxes = () => Array.from(document.querySelectorAll('.jobcb'));
+
+  function refresh() {
+    const bs = boxes();
+    const checked = bs.filter(b => b.checked).length;
+    count.textContent = checked + ' sélectionné(s)';
+    bulkBtn.disabled = checked === 0;
+    if (selectall) selectall.checked = bs.length > 0 && checked === bs.length;
+  }
+  function reapply() {
+    boxes().forEach(b => { b.checked = selected.has(b.value); });
+    refresh();
+  }
+  if (selectall) selectall.addEventListener('change', () => {
+    boxes().forEach(b => { b.checked = selectall.checked;
+      if (b.checked) selected.add(b.value); else selected.delete(b.value); });
+    refresh();
+  });
+  document.addEventListener('change', e => {
+    if (!e.target.classList.contains('jobcb')) return;
+    if (e.target.checked) selected.add(e.target.value); else selected.delete(e.target.value);
+    refresh();
+  });
+  // Re-apply after the polling / action swaps rebuild the rows.
+  document.body.addEventListener('htmx:afterSwap', e => {
+    if (e.target.id === 'jobs-tbody') reapply();
+  });
+</script>
+{% endblock %}

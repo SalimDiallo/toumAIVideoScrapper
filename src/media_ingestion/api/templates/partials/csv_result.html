@@ -1,0 +1,19 @@
+{% if not ok %}
+<div class="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">✕ {{ message }}</div>
+{% else %}
+<div class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+  ✓ {{ accepted }} job(s) créé(s) depuis <span class="font-medium">{{ filename }}</span>.
+  <a href="/ui/jobs" class="ml-1 underline">Voir les jobs →</a>
+</div>
+{% if duplicates %}
+<div class="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+  ⚠ {{ duplicates }} doublon(s) ignoré(s) (même video id, déjà présent).
+</div>
+{% endif %}
+{% if errors %}
+<div class="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+  <div class="font-medium">{{ errors|length }} ligne(s) ignorée(s) :</div>
+  <ul class="mt-1 list-disc pl-5 text-xs">{% for e in errors[:10] %}<li>{{ e }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+{% endif %}

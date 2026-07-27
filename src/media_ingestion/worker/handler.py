@@ -44,9 +44,7 @@ class JobHandler:
             log.error("job.failed", job_id=job_id, error=str(exc))
             return
 
-        self.job_store.update_status(
-            job_id, JobStatus.COMPLETED, result_uri=result.storage_uri
-        )
+        self.job_store.update_status(job_id, JobStatus.COMPLETED, result_uri=result.storage_uri)
         self.publisher.publish(
             self.settings.topic_job_completed,
             key=job_id,

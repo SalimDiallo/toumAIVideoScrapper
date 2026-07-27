@@ -102,5 +102,7 @@ class Job:
     status: JobStatus = JobStatus.PENDING
     result_uri: str | None = None
     error: str | None = None
+    # YouTube video id derived from `url` at creation, used to de-duplicate jobs.
+    video_id: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

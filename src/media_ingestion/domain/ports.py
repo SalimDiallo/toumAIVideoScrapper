@@ -6,10 +6,28 @@ new adapter — the use case never changes.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from .models import AudioAsset, IngestionResult, Job, JobStatus, Transcript, VideoMetadata
+
+
+@dataclass(frozen=True)
+class AudioHandle:
+    """A playable audio artifact, returned by StoragePort.open_audio().
+
+    Exactly one of `path` / `url` is set. Local storage returns a `path` (the
+    web layer serves it with HTTP range support, so the player can seek). Remote
+    storage (MinIO) returns a presigned `url` the browser fetches directly —
+    S3 range requests give full seeking without proxying bytes through the API.
+    """
+
+    media_type: str
+    path: Path | None = None
+    url: str | None = None
+    size: int | None = None
 
 
 class AudioDownloaderPort(Protocol):
@@ -37,6 +55,22 @@ class StoragePort(Protocol):
         """Read back the transcript.json at a storage location, or None if absent."""
         ...
 
+    def load_metadata(self, storage_uri: str) -> dict | None:
+        """Read back the metadata.json at a storage location, or None if absent."""
+        ...
+
+    def open_audio(self, storage_uri: str) -> AudioHandle | None:
+        """Return a playable handle to the audio artifact, or None if absent."""
+        ...
+
+    def read_audio(self, storage_uri: str) -> tuple[str, Iterator[bytes]] | None:
+        """Return (filename, byte-chunk iterator) for the audio (for zipping)."""
+        ...
+
+    def delete(self, storage_uri: str) -> None:
+        """Delete every artifact stored at this location (audio + json). Idempotent."""
+        ...
+
 
 class MetadataRepositoryPort(Protocol):
     def upsert(self, result: IngestionResult, language: str, storage_uri: str) -> None:
@@ -45,6 +79,14 @@ class MetadataRepositoryPort(Protocol):
 
     def list(self, *, language: str | None = None, limit: int = 50, offset: int = 0) -> list[dict]:
         """List catalog rows, most recent first, optionally filtered by language."""
+        ...
+
+    def get(self, video_id: str) -> dict | None:
+        """Fetch a single catalog row by video_id, or None if unknown."""
+        ...
+
+    def delete(self, video_id: str) -> None:
+        """Remove a catalog row by video_id. Idempotent."""
         ...
 
 
@@ -63,8 +105,7 @@ class JobStorePort(Protocol):
         """Persist a freshly accepted job (status PENDING)."""
         ...
 
-    def get(self, job_id: str) -> Job | None:
-        ...
+    def get(self, job_id: str) -> Job | None: ...
 
     def list(
         self, *, status: JobStatus | None = None, limit: int = 50, offset: int = 0
@@ -72,7 +113,27 @@ class JobStorePort(Protocol):
         """List jobs, most recent first, optionally filtered by status."""
         ...
 
-    def update_status(
-        self, job_id: str, status: JobStatus, *, result_uri: str | None = None, error: str | None = None
-    ) -> None:
+    def counts_by_status(self) -> dict[str, int]:
+        """Total number of jobs per status (for the dashboard KPIs)."""
         ...
+
+    def existing_video_ids(self, video_ids: Iterable[str]) -> set[str]:
+        """Subset of `video_ids` already tied to a non-failed job (de-duplication)."""
+        ...
+
+    def timeseries(self, *, days: int = 14) -> list[dict]:
+        """Per-day job counts over the last `days` (for the evolution chart)."""
+        ...
+
+    def delete(self, job_id: str) -> None:
+        """Remove a job record by id. Idempotent."""
+        ...
+
+    def update_status(
+        self,
+        job_id: str,
+        status: JobStatus,
+        *,
+        result_uri: str | None = None,
+        error: str | None = None,
+    ) -> None: ...

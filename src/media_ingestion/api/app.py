@@ -74,8 +74,12 @@ def create_app(
         return catalog or build_catalog(settings)
 
     def _new_job_event(url: str, languages: list[str]) -> tuple[str, dict]:
+        from ..video_id import extract_video_id
+
         job_id = uuid.uuid4().hex
-        store.create(Job(job_id=job_id, url=url, languages=languages))
+        store.create(
+            Job(job_id=job_id, url=url, languages=languages, video_id=extract_video_id(url))
+        )
         return job_id, {"job_id": job_id, "url": url, "languages": languages}
 
     @app.get("/health")
@@ -105,7 +109,9 @@ def create_app(
             if not url:
                 errors.append(f"line {i}: empty url")
                 continue
-            languages = _parse_languages(norm.get("lang") or norm.get("languages"), settings.languages)
+            languages = _parse_languages(
+                norm.get("lang") or norm.get("languages"), settings.languages
+            )
             job_id, event = _new_job_event(url, languages)
             events.append((job_id, event))
             jobs.append(BatchItem(url=url, job_id=job_id, languages=languages))
@@ -142,7 +148,9 @@ def create_app(
         if job is None:
             raise HTTPException(status_code=404, detail="job not found")
         if not job.result_uri:
-            raise HTTPException(status_code=409, detail=f"job not finished (status={job.status.value})")
+            raise HTTPException(
+                status_code=409, detail=f"job not finished (status={job.status.value})"
+            )
         transcript = _get_storage().load_transcript(job.result_uri)
         if transcript is None:
             raise HTTPException(status_code=404, detail="no transcript for this video")
@@ -169,6 +177,17 @@ def create_app(
     ) -> list[VideoItem]:
         rows = _get_catalog().list(language=language, limit=limit, offset=offset)
         return [VideoItem(**row) for row in rows]
+
+    from .ui import mount_ui
+
+    mount_ui(
+        app,
+        settings=settings,
+        store=store,
+        publisher=publisher,
+        get_storage=_get_storage,
+        get_catalog=_get_catalog,
+    )
 
     return app
 

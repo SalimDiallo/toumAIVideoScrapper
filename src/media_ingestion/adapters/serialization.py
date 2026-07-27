@@ -4,6 +4,23 @@ from __future__ import annotations
 
 from ..domain.models import IngestionResult, Transcript
 
+# Map an audio file extension to the MIME type the browser needs to play it.
+_AUDIO_MEDIA_TYPES = {
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".mp4": "audio/mp4",
+    ".webm": "audio/webm",
+    ".opus": "audio/ogg",
+    ".ogg": "audio/ogg",
+    ".flac": "audio/flac",
+    ".aac": "audio/aac",
+}
+
+
+def audio_media_type(suffix: str) -> str:
+    return _AUDIO_MEDIA_TYPES.get(suffix.lower(), "application/octet-stream")
+
 
 def metadata_dict(result: IngestionResult, language: str, audio_location: str) -> dict:
     m = result.metadata

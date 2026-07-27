@@ -1,0 +1,45 @@
+{% for j in jobs %}
+<tr class="border-b border-slate-100 hover:bg-slate-50/70">
+  {% if selectable %}<td class="px-4 py-3"><input type="checkbox" name="job_ids" value="{{ j.id }}" class="jobcb h-4 w-4 rounded border-slate-300"></td>{% endif %}
+  <td class="px-4 py-3">
+    <div class="max-w-[22rem] truncate font-medium text-slate-800" title="{{ j.url }}">{{ j.url }}</div>
+    <div class="font-mono text-xs text-slate-400">{{ j.short_id }}</div>
+  </td>
+  <td class="px-4 py-3">
+    <div class="flex flex-wrap gap-1">
+      {% for l in j.languages %}<span class="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">{{ l }}</span>{% endfor %}
+    </div>
+  </td>
+  <td class="px-4 py-3">
+    <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset {{ j.status_badge }}">
+      <span class="h-1.5 w-1.5 rounded-full {{ j.status_dot }}"></span>{{ j.status_label }}
+    </span>
+  </td>
+  <td class="px-4 py-3 max-w-[16rem]">
+    {% if j.error %}<span class="text-xs text-rose-600 line-clamp-2" title="{{ j.error }}">{{ j.error }}</span>
+    {% else %}<span class="text-slate-300">—</span>{% endif %}
+  </td>
+  <td class="px-4 py-3 whitespace-nowrap text-xs text-slate-500">{{ j.created_at }}</td>
+  <td class="px-4 py-3 whitespace-nowrap text-xs text-slate-500">{{ j.updated_at }}</td>
+  <td class="px-4 py-3 text-right whitespace-nowrap">
+    {% if j.can_retry %}
+    <form hx-post="/ui/jobs/{{ j.id }}/retry" hx-target="#jobs-tbody" hx-swap="innerHTML" class="inline">
+      <input type="hidden" name="status" value="{{ status or '' }}">
+      {% if selectable %}<input type="hidden" name="selectable" value="1">{% endif %}
+      <button class="rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100">↻ Retry</button>
+    </form>
+    {% endif %}
+    {% if j.has_transcript %}
+    <a href="/ui/jobs/{{ j.id }}/transcript" class="ml-1 rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50">Transcript</a>
+    {% endif %}
+    <form hx-post="/ui/jobs/{{ j.id }}/delete" hx-target="#jobs-tbody" hx-swap="innerHTML"
+          hx-confirm="Supprimer ce job ?" class="inline">
+      <input type="hidden" name="status" value="{{ status or '' }}">
+      {% if selectable %}<input type="hidden" name="selectable" value="1">{% endif %}
+      <button type="submit" class="ml-1 rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50">🗑</button>
+    </form>
+  </td>
+</tr>
+{% else %}
+<tr><td colspan="{{ 8 if selectable else 7 }}" class="px-4 py-12 text-center text-sm text-slate-400">Aucun job pour ce filtre.</td></tr>
+{% endfor %}

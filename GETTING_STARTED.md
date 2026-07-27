@@ -104,13 +104,30 @@ Arrêt : `docker compose down` (ajouter `-v` pour **effacer** les volumes/donné
 ```powershell
 .\.venv\Scripts\toumai-api.exe        # ou: toumai-api  (venv activé)
 ```
-→ http://localhost:8000/docs (Swagger)
+→ http://localhost:8000/ — **interface web (dashboard)**
+→ http://localhost:8000/docs — Swagger (API JSON)
 
 **Terminal 2 — worker Kafka** (consomme `job.requested`)
 
 ```powershell
 .\.venv\Scripts\toumai-worker.exe     # ou: toumai-worker
 ```
+
+### Interface web (dashboard)
+
+Ouvre **http://localhost:8000/** (redirige vers `/ui/`). Interface HTMX + Tailwind
+servie directement par l'API — aucun build ni serveur front séparé, rien à installer
+en plus (`jinja2` fait partie des dépendances).
+
+| Vue | Contenu |
+|-----|---------|
+| **Tableau de bord** | KPIs par statut + courbe d'évolution des téléchargements (rafraîchissement live) |
+| **Jobs** | liste filtrable par statut (auto-refresh 5 s), retry, suppression unitaire **et par sélection** |
+| **Upload** | soumettre une URL ou un CSV de lot ; **anti-doublon par `video_id`** (même vidéo ignorée) |
+| **Vidéos** | catalogue ; lecteur audio avec **transcript synchronisé** (clic sur un segment = seek) ; **téléchargement ZIP** (audio + `transcript.json` + `metadata.json`) par sélection ou tout le catalogue ; suppression unitaire **et par sélection** (supprime aussi l'audio dans MinIO) |
+
+> Naviguer dans l'UI ne nécessite pas ffmpeg ; seul l'ingestion réelle d'une vidéo
+> (worker) en a besoin.
 
 ---
 

@@ -81,3 +81,13 @@ class PostgresMetadataRepository:
         with self._engine.connect() as conn:
             rows = conn.execute(stmt).mappings().all()
         return [dict(r) for r in rows]
+
+    def get(self, video_id: str) -> dict | None:
+        stmt = select(videos).where(videos.c.video_id == video_id)
+        with self._engine.connect() as conn:
+            row = conn.execute(stmt).mappings().first()
+        return dict(row) if row is not None else None
+
+    def delete(self, video_id: str) -> None:
+        with self._engine.begin() as conn:
+            conn.execute(videos.delete().where(videos.c.video_id == video_id))

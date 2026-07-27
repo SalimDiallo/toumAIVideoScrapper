@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="fr" class="h-full bg-slate-50">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}TOUMAI · Ingestion{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui'] } } } };
+  </script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="preconnect" href="https://rsms.me/"><link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+</head>
+<body class="h-full text-slate-800 antialiased">
+<div class="flex min-h-full">
+  <!-- Sidebar -->
+  <aside class="hidden md:flex md:w-60 md:flex-col md:fixed md:inset-y-0 border-r border-slate-200 bg-white">
+    <div class="flex flex-col justify-center gap-0.5 h-16 px-6 bg-[#018B96]">
+      <img src="/static/toumai-logo-white.webp" alt="TOUMAI" class="h-6 w-auto self-start">
+      <span class="text-[11px] tracking-wide text-white/70">Ingestion média</span>
+    </div>
+    <nav class="flex-1 px-3 py-4 space-y-1 text-sm">
+      {% set nav = [('dashboard','/ui/','Tableau de bord','M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6'),
+                    ('jobs','/ui/jobs','Jobs','M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'),
+                    ('upload','/ui/upload','Upload','M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12'),
+                    ('videos','/ui/videos','Vidéos','M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z')] %}
+      {% for key, href, label, icon in nav %}
+      <a href="{{ href }}" class="flex items-center gap-3 rounded-lg px-3 py-2 font-medium transition
+         {% if active == key %}bg-[#018B96] text-white{% else %}text-slate-600 hover:bg-slate-100{% endif %}">
+        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="{{ icon }}"/></svg>
+        {{ label }}
+      </a>
+      {% endfor %}
+    </nav>
+    <div class="px-6 py-4 text-xs text-slate-400 border-t border-slate-100">v0.1 · dashboard interne</div>
+  </aside>
+
+  <!-- Main -->
+  <div class="flex-1 md:pl-60">
+    <header class="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-slate-200 bg-white/80 backdrop-blur px-6">
+      <h1 class="text-lg font-semibold">{% block heading %}{% endblock %}</h1>
+      <div class="flex items-center gap-3">
+        <span class="hidden sm:inline-flex items-center gap-1.5 text-xs text-slate-400">
+          <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span> live
+        </span>
+        <a href="/ui/upload" class="inline-flex items-center gap-1.5 rounded-lg bg-[#018B96] px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700">
+          + Nouveau job
+        </a>
+      </div>
+    </header>
+    <main class="p-6">{% block content %}{% endblock %}</main>
+  </div>
+</div>
+{% block scripts %}{% endblock %}
+</body>
+</html>

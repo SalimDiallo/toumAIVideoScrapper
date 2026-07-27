@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block heading %}Tableau de bord{% endblock %}
+{% block content %}
+
+<div id="kpis" hx-get="/ui/partials/kpis" hx-trigger="every 5s" hx-swap="innerHTML">
+  {% include "partials/kpis.html" %}
+</div>
+
+<div class="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
+  <div class="lg:col-span-2 rounded-xl border border-slate-200 bg-white p-5">
+    <div class="flex items-center justify-between">
+      <h2 class="font-semibold text-slate-800">Évolution des téléchargements</h2>
+      <span class="text-xs text-slate-400">14 derniers jours</span>
+    </div>
+    <div class="mt-4 h-64"><canvas id="chart"></canvas></div>
+  </div>
+
+  <div class="rounded-xl border border-slate-200 bg-white p-5">
+    <h2 class="font-semibold text-slate-800">Répartition</h2>
+    <div class="mt-4 space-y-3">
+      {% for s in STATUS_ORDER %}
+      {% set m = STATUS_META[s] %}
+      {% set n = kpis.counts[s] %}
+      {% set pct = (100 * n / kpis.total) if kpis.total else 0 %}
+      <div>
+        <div class="flex items-center justify-between text-sm">
+          <span class="flex items-center gap-2 text-slate-600"><span class="h-2 w-2 rounded-full {{ m.dot }}"></span>{{ m.label }}</span>
+          <span class="font-medium text-slate-800">{{ n }}</span>
+        </div>
+        <div class="mt-1 h-1.5 w-full rounded-full bg-slate-100"><div class="h-1.5 rounded-full {{ m.dot }}" style="width: {{ pct }}%"></div></div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="mt-6 rounded-xl border border-slate-200 bg-white">
+  <div class="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+    <h2 class="font-semibold text-slate-800">Jobs récents</h2>
+    <a href="/ui/jobs" class="text-sm font-medium text-indigo-600 hover:underline">Tout voir →</a>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="text-left text-xs uppercase tracking-wide text-slate-400">
+        <tr class="border-b border-slate-100">
+          <th class="px-4 py-3 font-medium">Vidéo</th><th class="px-4 py-3 font-medium">Langues</th>
+          <th class="px-4 py-3 font-medium">Statut</th><th class="px-4 py-3 font-medium">Erreur</th>
+          <th class="px-4 py-3 font-medium">Créé</th><th class="px-4 py-3 font-medium">MàJ</th>
+          <th class="px-4 py-3"></th>
+        </tr>
+      </thead>
+      <tbody id="jobs-tbody" hx-get="/ui/partials/jobs-rows?limit=8" hx-trigger="every 5s" hx-swap="innerHTML">
+        {% with jobs = recent %}{% include "partials/jobs_rows.html" %}{% endwith %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const chartData = {{ chart | tojson }};
+  const ctx = document.getElementById('chart');
+  const chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: chartData.labels,
+      datasets: [
+        { label: 'Terminés', data: chartData.completed, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,.1)', fill: true, tension: .35 },
+        { label: 'Échecs', data: chartData.failed, borderColor: '#f43f5e', backgroundColor: 'rgba(244,63,94,.08)', fill: true, tension: .35 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, usePointStyle: true } } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: '#f1f5f9' } }, x: { grid: { display: false } } }
+    }
+  });
+  async function refreshChart() {
+    try {
+      const r = await fetch('/ui/api/timeseries?days=14');
+      const d = await r.json();
+      chart.data.labels = d.labels;
+      chart.data.datasets[0].data = d.completed;
+      chart.data.datasets[1].data = d.failed;
+      chart.update();
+    } catch (e) {}
+  }
+  setInterval(refreshChart, 15000);
+</script>
+{% endblock %}

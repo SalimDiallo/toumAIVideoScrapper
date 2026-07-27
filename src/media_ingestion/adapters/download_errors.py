@@ -9,3 +9,21 @@ class RateLimitedError(Exception):
     Signalée par le downloader pour que la couche de reprise applique un backoff
     exponentiel et, si configuré, change de proxy avant de réessayer.
     """
+
+
+
+class ProxyBalancerConfig:
+    def __init__(self) -> None:
+        pass
+
+    def formatProxy(self):
+        ...
+    
+    def getRandomProxy(self):
+        ...
+    
+    def checkProxy(self):
+        pass
+
+    def moveToExpiredProxy(self):
+        ...

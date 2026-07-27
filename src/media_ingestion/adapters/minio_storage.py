@@ -8,13 +8,16 @@ from __future__ import annotations
 
 import io
 import json
+from collections.abc import Iterator
+from datetime import timedelta
 from pathlib import Path
 
 import structlog
 from minio import Minio
 
 from ..domain.models import IngestionResult
-from .serialization import metadata_dict, transcript_dict
+from ..domain.ports import AudioHandle
+from .serialization import audio_media_type, metadata_dict, transcript_dict
 
 log = structlog.get_logger(__name__)
 
@@ -62,9 +65,15 @@ class MinioStorage:
         return uri
 
     def load_transcript(self, storage_uri: str) -> dict | None:
+        return self._load_json(storage_uri, "transcript.json")
+
+    def load_metadata(self, storage_uri: str) -> dict | None:
+        return self._load_json(storage_uri, "metadata.json")
+
+    def _load_json(self, storage_uri: str, name: str) -> dict | None:
         # storage_uri: s3://<bucket>/<prefix>
         prefix = storage_uri.split(f"s3://{self._bucket}/", 1)[-1]
-        key = f"{prefix}/transcript.json"
+        key = f"{prefix}/{name}"
         try:
             response = self._client.get_object(self._bucket, key)
             try:
@@ -73,6 +82,53 @@ class MinioStorage:
                 response.close()
                 response.release_conn()
         except Exception:  # noqa: BLE001 - object missing / no such key
+            return None
+
+    def open_audio(self, storage_uri: str) -> AudioHandle | None:
+        # storage_uri: s3://<bucket>/<prefix>; the audio is the one non-JSON object.
+        # We hand back a presigned URL so the browser streams straight from MinIO
+        # (S3 range requests => the player can seek), instead of proxying bytes.
+        audio_key = self._audio_key(storage_uri)
+        if audio_key is None:
+            return None
+        try:
+            url = self._client.presigned_get_object(
+                self._bucket, audio_key, expires=timedelta(hours=2)
+            )
+        except Exception:  # noqa: BLE001 - signing failed
+            return None
+        return AudioHandle(media_type=audio_media_type(Path(audio_key).suffix), url=url)
+
+    def read_audio(self, storage_uri: str) -> tuple[str, Iterator[bytes]] | None:
+        audio_key = self._audio_key(storage_uri)
+        if audio_key is None:
+            return None
+        response = self._client.get_object(self._bucket, audio_key)
+
+        def _chunks() -> Iterator[bytes]:
+            try:
+                yield from response.stream(1 << 16)
+            finally:
+                response.close()
+                response.release_conn()
+
+        return Path(audio_key).name, _chunks()
+
+    def delete(self, storage_uri: str) -> None:
+        prefix = storage_uri.split(f"s3://{self._bucket}/", 1)[-1]
+        try:
+            objs = self._client.list_objects(self._bucket, prefix=f"{prefix}/", recursive=True)
+            for obj in objs:
+                self._client.remove_object(self._bucket, obj.object_name)
+        except Exception:  # noqa: BLE001 - prefix already gone / listing failed
+            log.warning("minio.delete_failed", uri=storage_uri)
+
+    def _audio_key(self, storage_uri: str) -> str | None:
+        prefix = storage_uri.split(f"s3://{self._bucket}/", 1)[-1]
+        try:
+            objs = self._client.list_objects(self._bucket, prefix=f"{prefix}/", recursive=True)
+            return next((o.object_name for o in objs if not o.object_name.endswith(".json")), None)
+        except Exception:  # noqa: BLE001 - listing failed / prefix missing
             return None
 
     def _put_json(self, key: str, obj: dict) -> None:

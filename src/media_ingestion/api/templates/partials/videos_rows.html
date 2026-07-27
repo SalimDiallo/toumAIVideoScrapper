@@ -1,0 +1,27 @@
+{% for v in videos %}
+<tr class="border-b border-slate-100 hover:bg-slate-50/70">
+  <td class="px-4 py-3"><input type="checkbox" name="video_ids" value="{{ v.video_id }}" class="rowcb h-4 w-4 rounded border-slate-300"></td>
+  <td class="px-4 py-3">
+    <a href="/ui/videos/{{ v.video_id }}" class="max-w-[22rem] truncate font-medium text-slate-800 hover:text-indigo-600 block" title="{{ v.title or v.url }}">{{ v.title or v.url }}</a>
+    <span class="font-mono text-xs text-slate-400">{{ v.video_id }}</span>
+  </td>
+  <td class="px-4 py-3 text-slate-600">{{ v.channel or "—" }}</td>
+  <td class="px-4 py-3"><span class="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">{{ v.language or "—" }}</span></td>
+  <td class="px-4 py-3">
+    {% if v.transcript_status == "available" %}<span class="text-emerald-600 text-xs font-medium">disponible</span>
+    {% else %}<span class="text-slate-400 text-xs">{{ v.transcript_status or "—" }}</span>{% endif %}
+  </td>
+  <td class="px-4 py-3 text-xs text-slate-500">{{ v.transcript_source or "—" }}</td>
+  <td class="px-4 py-3 text-xs text-slate-500">{% if v.duration_s %}{{ (v.duration_s // 60) }}min{% else %}—{% endif %}</td>
+  <td class="px-4 py-3 text-right whitespace-nowrap">
+    <a href="/ui/videos/{{ v.video_id }}" class="rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50">▶ Ouvrir</a>
+    <button type="button"
+            hx-post="/ui/videos/{{ v.video_id }}/delete"
+            hx-target="closest tr" hx-swap="outerHTML"
+            hx-confirm="Supprimer cette vidéo et son audio ? Action irréversible."
+            class="ml-1 rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50">🗑 Supprimer</button>
+  </td>
+</tr>
+{% else %}
+<tr><td colspan="8" class="px-4 py-12 text-center text-sm text-slate-400">Aucune vidéo dans le catalogue.</td></tr>
+{% endfor %}

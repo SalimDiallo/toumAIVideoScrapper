@@ -76,7 +76,9 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings()
     parser = argparse.ArgumentParser(prog="toumai-ingest", description=__doc__)
     parser.add_argument("url", help="YouTube video URL")
-    parser.add_argument("--lang", nargs="+", default=settings.languages, help="Preferred caption languages")
+    parser.add_argument(
+        "--lang", nargs="+", default=settings.languages, help="Preferred caption languages"
+    )
     parser.add_argument("--data-dir", default=str(settings.data_dir), help="Output root directory")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
@@ -86,7 +88,9 @@ def main(argv: list[str] | None = None) -> int:
     use_case = build_use_case(settings)
 
     result = use_case.execute(args.url, work_dir=settings.data_dir, languages=args.lang)
-    print(f"[{result.transcript_status.value}] {result.metadata.title} -> {settings.data_dir / result.metadata.video_id}")
+    print(
+        f"[{result.transcript_status.value}] {result.metadata.title} -> {settings.data_dir / result.metadata.video_id}"
+    )
     return 0
 
 

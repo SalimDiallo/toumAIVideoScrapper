@@ -1,0 +1,6 @@
+<div class="rounded-lg border px-4 py-3 text-sm
+  {% if warn %}border-amber-200 bg-amber-50 text-amber-700
+  {% elif ok %}border-emerald-200 bg-emerald-50 text-emerald-700
+  {% else %}border-rose-200 bg-rose-50 text-rose-700{% endif %}">
+  {% if warn %}⚠ {% elif ok %}✓ {% else %}✕ {% endif %}{{ message }}
+</div>

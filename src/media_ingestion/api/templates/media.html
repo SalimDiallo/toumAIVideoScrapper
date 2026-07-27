@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block heading %}Lecture{% endblock %}
+{% block content %}
+
+<a href="/ui/{% if active == 'videos' %}videos{% else %}jobs{% endif %}" class="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800">← Retour</a>
+
+{% if message %}
+<div class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{{ message }}</div>
+{% else %}
+
+<div class="mt-4 rounded-xl border border-slate-200 bg-white">
+  <div class="flex flex-wrap items-center gap-3 border-b border-slate-100 p-5">
+    <div class="min-w-0 flex-1">
+      {% if url %}<a href="{{ url }}" target="_blank" rel="noopener" class="block truncate font-semibold text-slate-800 hover:text-indigo-600">{{ title }}</a>
+      {% else %}<span class="font-semibold text-slate-800">{{ title }}</span>{% endif %}
+      <div class="mt-1 flex flex-wrap gap-1">
+        {% for b in badges %}<span class="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{{ b }}</span>{% endfor %}
+        {% if segments %}<span class="rounded bg-indigo-50 px-2 py-0.5 text-xs text-indigo-600">{{ segments|length }} segments</span>{% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% if audio_url %}
+  <div class="sticky top-16 z-10 border-b border-slate-100 bg-white/90 px-5 py-3 backdrop-blur">
+    <audio id="player" controls preload="metadata" class="w-full">
+      <source src="{{ audio_url }}">
+      Votre navigateur ne peut pas lire cet audio.
+    </audio>
+  </div>
+  {% else %}
+  <div class="border-b border-slate-100 px-5 py-3 text-xs text-slate-400">Audio indisponible pour cette vidéo.</div>
+  {% endif %}
+
+  <div class="p-2 sm:p-4">
+    {% if segments %}
+    <ol id="segments" class="divide-y divide-slate-50">
+      {% for seg in segments %}
+      <li>
+        <button type="button" data-start="{{ seg.start_s }}"
+                class="seg group flex w-full gap-3 rounded-lg px-3 py-2 text-left hover:bg-slate-50">
+          <span class="mt-0.5 w-16 shrink-0 font-mono text-xs text-indigo-500 group-hover:text-indigo-700">{{ seg.ts }}</span>
+          <span class="text-sm leading-relaxed text-slate-700">{{ seg.text }}</span>
+        </button>
+      </li>
+      {% endfor %}
+    </ol>
+    {% elif plain_text %}
+    <p class="whitespace-pre-wrap px-3 py-2 text-sm leading-relaxed text-slate-700">{{ plain_text }}</p>
+    {% else %}
+    <p class="px-3 py-6 text-center text-sm text-slate-400">Aucun transcript disponible.</p>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const player = document.getElementById('player');
+  const segs = Array.from(document.querySelectorAll('.seg'));
+  if (player && segs.length) {
+    const starts = segs.map(b => parseFloat(b.dataset.start));
+    // Click a segment -> seek the audio there and play.
+    segs.forEach((btn, i) => btn.addEventListener('click', () => {
+      player.currentTime = starts[i];
+      player.play().catch(() => {});
+    }));
+    // Highlight the segment currently being spoken.
+    let active = -1;
+    const activeCls = ['bg-indigo-50', 'ring-1', 'ring-inset', 'ring-indigo-200'];
+    player.addEventListener('timeupdate', () => {
+      const t = player.currentTime;
+      let idx = -1;
+      for (let i = 0; i < starts.length; i++) { if (starts[i] <= t) idx = i; else break; }
+      if (idx === active) return;
+      if (active >= 0) segs[active].classList.remove(...activeCls);
+      if (idx >= 0) {
+        segs[idx].classList.add(...activeCls);
+        segs[idx].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+      active = idx;
+    });
+  }
+</script>
+{% endblock %}
