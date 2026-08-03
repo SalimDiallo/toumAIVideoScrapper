@@ -27,7 +27,7 @@ install: ## Crée le venv et installe le projet (+ dev)
 	$(PY) -m pip install -e ".[dev]"
 
 test: ## Lance les tests
-	$(PY) -m pytest -q
+	$(PY) -m pytest -q -vvv
 
 lint: ## Vérifie le style (ruff + black --check)
 	$(PY) -m ruff check src tests

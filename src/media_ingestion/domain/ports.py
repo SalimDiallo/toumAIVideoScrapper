@@ -1,6 +1,6 @@
 """Ports (interfaces). Adapters implement these; the use case depends only on them.
 
-This is what makes Phase 2 cheap: swapping local disk for MinIO means writing a
+swapping local disk for MinIO means writing a
 new adapter — the use case never changes.
 """
 
@@ -137,3 +137,4 @@ class JobStorePort(Protocol):
         result_uri: str | None = None,
         error: str | None = None,
     ) -> None: ...
+

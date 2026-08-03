@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # directe. Ex JSON : ["http://ip1:port","http://ip2:port"].
     download_proxies: list[str] = Field(default_factory=list)
 
-    # Phase 2 storage backend
+    # storage backend
     storage_backend: Literal["local", "minio"] = "local"
     minio_endpoint: str = "localhost:9000"
     minio_access_key: str = "minioadmin"
@@ -49,11 +49,11 @@ class Settings(BaseSettings):
     minio_bucket: str = "toumai-media"
     minio_secure: bool = False
 
-    # Phase 2 metadata catalog
+    # metadata catalog
     metadata_backend: Literal["none", "postgres"] = "none"
     postgres_dsn: str = "postgresql+psycopg://toumai:toumai@localhost:5432/toumai"
 
-    # Phase 2 Kafka (API <-> workers decoupling)
+    # Kafka (API <-> workers decoupling)
     kafka_bootstrap_servers: str = "localhost:9092"
     # Version d'API fixe pour éviter le probing de kafka-python-ng qui plante sous
     # Windows/Python 3.14 (socket abandonnée -> selector.register(None)). "2.5.0".

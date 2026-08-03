@@ -1,4 +1,4 @@
-"""Factories for the Phase 2 infra pieces shared by the API and the worker."""
+"""Factories for the infrastructure pieces shared by the API and the worker."""
 
 from __future__ import annotations
 

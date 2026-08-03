@@ -73,9 +73,15 @@ Sortie dans `data/<video_id>/` : `metadata.json` (+ `transcript.json` si dispo).
 pytest            # tests du use case avec fakes (sans réseau ni ffmpeg)
 ```
 
-## Roadmap Phase 2
 
-- Événements Kafka (`job.requested`, `job.completed`, DLQ)
-- MinIO medallion (Bronze/Silver/Gold, Parquet), Postgres, Elasticsearch, Qdrant
-- API FastAPI (`POST /process` → 202 + `job_id`)
-```
+
+
+### listes des plateformes cibles :
+YouTube ok 
+Vimeo 
+Dailymotion
+TikTok (contenus publics)
+Rumble
+Odysee
+PeerTube
+Reddit (vidéos publiques)
