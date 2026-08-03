@@ -17,6 +17,12 @@ class ProcessAccepted(BaseModel):
     status: str
 
 
+class PlaylistRequest(BaseModel):
+    # A playlist URL (…/playlist?list=…, watch?v=…&list=…) or a bare playlist id.
+    playlist: str
+    languages: list[str] | None = None
+
+
 class BatchItem(BaseModel):
     url: str
     job_id: str

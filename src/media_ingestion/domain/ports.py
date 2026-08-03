@@ -42,6 +42,24 @@ class TranscriptProviderPort(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class PlaylistEntry:
+    """One video listed in a playlist (metadata only, nothing downloaded yet)."""
+
+    video_id: str
+    url: str
+    title: str | None = None
+
+
+class PlaylistResolverPort(Protocol):
+    def resolve(self, playlist_url_or_id: str) -> list[PlaylistEntry]:
+        """Expand a playlist URL/id into its video entries (no download).
+
+        Returns an empty list when the playlist is empty or cannot be read.
+        """
+        ...
+
+
 class StoragePort(Protocol):
     def save(self, result: IngestionResult, language: str) -> str:
         """Persist the result (audio + json), grouped by language.
@@ -77,8 +95,19 @@ class MetadataRepositoryPort(Protocol):
         """Index the ingested video in a catalog (e.g. Postgres). Idempotent per video_id."""
         ...
 
-    def list(self, *, language: str | None = None, limit: int = 50, offset: int = 0) -> list[dict]:
-        """List catalog rows, most recent first, optionally filtered by language."""
+    def list(
+        self,
+        *,
+        language: str | None = None,
+        transcript: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
+        """List catalog rows, most recent first.
+
+        Optionally filtered by `language` and/or `transcript` status
+        ("available" / "unavailable").
+        """
         ...
 
     def get(self, video_id: str) -> dict | None:

@@ -78,6 +78,22 @@ def test_rotates_proxies_across_attempts(tmp_path):
     assert inner.calls == ["http://p1", "http://p2", "http://p1"]
 
 
+def test_rotates_proxies_across_downloads(tmp_path):
+    """Le curseur persiste entre vidéos : chaque download sort par une IP différente."""
+    inner = FakeInner()  # aucun 429 -> une seule tentative par download
+    dl, _ = _make(
+        inner,
+        delay_min_s=0,
+        delay_max_s=0,
+        max_retries=0,
+        proxies=["http://p1", "http://p2"],
+    )
+    for _ in range(3):
+        dl.download("http://yt/x", tmp_path)
+    # video 1 -> p1, video 2 -> p2, video 3 -> p1 (et non p1 à chaque fois)
+    assert inner.calls == ["http://p1", "http://p2", "http://p1"]
+
+
 def test_backoff_is_capped(tmp_path):
     inner = FakeInner(fail_times=1)
     dl, slept = _make(

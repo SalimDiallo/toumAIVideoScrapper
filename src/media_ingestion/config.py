@@ -18,12 +18,27 @@ class Settings(BaseSettings):
     # Explicit ffmpeg/ffprobe folder (bin dir). None = rely on PATH.
     ffmpeg_location: Path | None = None
 
+    # --- yt-dlp cookies (contourne "Sign in to confirm you're not a bot") ---
+    # Navigateur d'où extraire les cookies (chrome/firefox/edge/brave...),
+    # éventuellement suffixé du profil : "chrome:Profile 1". Vide = désactivé.
+    ytdlp_cookies_from_browser: str | None = None
+    # OU chemin d'un fichier cookies.txt exporté (format Netscape). N'en renseigner
+    # qu'un seul des deux ; si les deux sont fournis, le fichier a la priorité.
+    ytdlp_cookies_file: Path | None = None
+
     # --- Transcript selection strategy (YouTube caption tracks) ---
     # Accept YouTube's auto-generated (ASR) captions. When False, ASR tracks are
     # ignored so the video is marked unavailable rather than using YT ASR.
     accept_youtube_asr: bool = True
     # As a last resort, machine-translate an existing track into a target language.
     enable_transcript_translation: bool = False
+
+    # --- Webshare (proxy résidentiel) pour youtube-transcript-api ---
+    # L'API de transcripts se fait bannir par IP (surtout depuis une IP cloud).
+    # Webshare fait tourner des IP résidentielles ; renseigner user+pass du
+    # dashboard. Vide = transcripts en connexion directe (pas de proxy).
+    webshare_proxy_username: str | None = None
+    webshare_proxy_password: str | None = None
 
     # --- Download throttling / anti-blocage (batch CSV = centaines de vidéos) ---
     # Plafond de téléchargements simultanés par worker/serveur (yt-dlp est I/O bound).

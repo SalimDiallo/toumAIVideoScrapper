@@ -20,9 +20,20 @@ log = structlog.get_logger(__name__)
 
 
 class YtDlpDownloader:
-    def __init__(self, audio_format: str = "wav", ffmpeg_location: Path | None = None) -> None:
+    def __init__(
+        self,
+        audio_format: str = "wav",
+        ffmpeg_location: Path | None = None,
+        *,
+        cookies_from_browser: str | None = None,
+        cookies_file: Path | None = None,
+    ) -> None:
         self._audio_format = audio_format
         self._ffmpeg_location = Path(ffmpeg_location) if ffmpeg_location else None
+        # Cookies pour passer le check anti-bot de YouTube. Le fichier prime sur le
+        # navigateur si les deux sont fournis.
+        self._cookies_file = Path(cookies_file) if cookies_file else None
+        self._cookies_from_browser = cookies_from_browser or None
 
     def download(
         self, video_url: str, dest_dir: Path, *, proxy: str | None = None
@@ -44,6 +55,14 @@ class YtDlpDownloader:
         }
         if proxy:
             opts["proxy"] = proxy
+        # Cookies : le fichier a la priorité, sinon extraction depuis le navigateur.
+        if self._cookies_file is not None:
+            opts["cookiefile"] = str(self._cookies_file)
+        elif self._cookies_from_browser is not None:
+            # yt-dlp attend un tuple (browser, profile, keyring, container) ;
+            # "chrome:Profile 1" -> ("chrome", "Profile 1").
+            browser, _, profile = self._cookies_from_browser.partition(":")
+            opts["cookiesfrombrowser"] = (browser.strip(), profile.strip() or None, None, None)
         if has_ffmpeg:
             opts["postprocessors"] = [
                 {"key": "FFmpegExtractAudio", "preferredcodec": self._audio_format}
@@ -52,14 +71,22 @@ class YtDlpDownloader:
                 opts["ffmpeg_location"] = str(self._ffmpeg_location)
 
         try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(video_url, download=True)
+            info = self._extract(opts, video_url)
         except yt_dlp.utils.DownloadError as exc:
             # Remonte le 429 en erreur typée pour que la couche throttling applique
             # son backoff ; toute autre erreur de download reste telle quelle.
             if _is_rate_limited(exc):
                 raise RateLimitedError(str(exc)) from exc
-            raise
+            # Les cookies sont optionnels : si leur extraction échoue (navigateur
+            # ouvert/verrouillé, chiffrement app-bound Chrome...), on réessaie sans
+            # plutôt que de faire échouer le job.
+            if _uses_cookies(opts) and _is_cookie_error(exc):
+                log.warning("ytdlp.cookies.unavailable", url=video_url, error=str(exc))
+                opts.pop("cookiefile", None)
+                opts.pop("cookiesfrombrowser", None)
+                info = self._extract(opts, video_url)
+            else:
+                raise
 
         video_id = info["id"]
         if has_ffmpeg:
@@ -82,6 +109,11 @@ class YtDlpDownloader:
         return metadata, audio
 
     @staticmethod
+    def _extract(opts: dict, video_url: str) -> dict:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            return ydl.extract_info(video_url, download=True)
+
+    @staticmethod
     def _downloaded_path(info: dict, dest_dir: Path, video_id: str) -> Path:
         downloads = info.get("requested_downloads") or []
         if downloads and downloads[0].get("filepath"):
@@ -93,3 +125,19 @@ class YtDlpDownloader:
 def _is_rate_limited(exc: Exception) -> bool:
     msg = str(exc).lower()
     return "429" in msg or "too many requests" in msg
+
+
+def _uses_cookies(opts: dict) -> bool:
+    return "cookiefile" in opts or "cookiesfrombrowser" in opts
+
+
+def _is_cookie_error(exc: Exception) -> bool:
+    """Échec d'extraction/lecture des cookies (et non un vrai refus de la vidéo)."""
+    msg = str(exc).lower()
+    return "cookie" in msg and (
+        "could not copy" in msg
+        or "could not find" in msg
+        or "unable to" in msg
+        or "failed to" in msg
+        or "decrypt" in msg
+    )

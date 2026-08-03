@@ -29,11 +29,13 @@ from starlette.background import BackgroundTask
 
 from ..config import Settings
 from ..domain.models import Job, JobStatus
+from ..playlist import extract_playlist_id
 from ..video_id import extract_video_id
 from ..domain.ports import (
     EventPublisherPort,
     JobStorePort,
     MetadataRepositoryPort,
+    PlaylistResolverPort,
     StoragePort,
 )
 
@@ -157,6 +159,7 @@ def mount_ui(
     publisher: EventPublisherPort,
     get_storage: Callable[[], StoragePort],
     get_catalog: Callable[[], MetadataRepositoryPort],
+    get_playlist_resolver: Callable[[], PlaylistResolverPort],
 ) -> None:
     """Attach static files + the /ui router to an existing FastAPI app."""
     app.mount("/static", StaticFiles(directory=str(_BASE / "static")), name="static")
@@ -202,13 +205,28 @@ def mount_ui(
         )
 
     @router.get("/videos", response_class=HTMLResponse)
-    def videos_page(request: Request, language: str | None = None) -> HTMLResponse:
-        rows = get_catalog().list(language=language or None, limit=200)
-        langs = sorted({r.get("language") for r in rows if r.get("language")})
+    def videos_page(
+        request: Request, language: str | None = None, transcript: str | None = None
+    ) -> HTMLResponse:
+        transcript = transcript if transcript in ("available", "unavailable") else None
+        rows = get_catalog().list(
+            language=language or None, transcript=transcript, limit=200
+        )
+        # Language chips are built from a transcript-unfiltered scan so they stay
+        # stable whatever the transcript filter is.
+        langs = sorted(
+            {r.get("language") for r in get_catalog().list(limit=10000) if r.get("language")}
+        )
         return templates.TemplateResponse(
             request,
             "videos.html",
-            {"active": "videos", "videos": rows, "languages": langs, "language": language},
+            {
+                "active": "videos",
+                "videos": rows,
+                "languages": langs,
+                "language": language,
+                "transcript": transcript,
+            },
         )
 
     def _media_ctx(
@@ -373,12 +391,16 @@ def mount_ui(
 
     @router.post("/videos/bulk-delete", response_class=HTMLResponse)
     def bulk_delete_videos(
-        request: Request, video_ids: list[str] = Form(default=[]), language: str | None = None
+        request: Request,
+        video_ids: list[str] = Form(default=[]),
+        language: str | None = None,
+        transcript: str | None = None,
     ) -> HTMLResponse:
+        transcript = transcript if transcript in ("available", "unavailable") else None
         for vid in video_ids:
             if vid:
                 _delete_video(vid)
-        rows = get_catalog().list(language=language or None, limit=200)
+        rows = get_catalog().list(language=language or None, transcript=transcript, limit=200)
         return templates.TemplateResponse(request, "partials/videos_rows.html", {"videos": rows})
 
     # --------------------------------------------------------------- fragments
@@ -482,6 +504,63 @@ def mount_ui(
             {"ok": True, "message": f"Job créé : {job_id[:8]} ({', '.join(langs)})"},
         )
 
+    def _queue_dedup(rows: list[tuple[str, list[str], str | None]]) -> tuple[int, int]:
+        """Create + publish a job per row, skipping videos already known or repeated.
+
+        Dedup is by YouTube video id, against existing non-failed jobs *and* within
+        this same batch. Returns (accepted, duplicates).
+        """
+        already = store.existing_video_ids({vid for _, _, vid in rows if vid})
+        seen: set[str] = set()
+        accepted = 0
+        duplicates = 0
+        events: list[tuple[str, dict]] = []
+        for url, langs, vid in rows:
+            if vid and (vid in already or vid in seen):
+                duplicates += 1
+                continue
+            job_id = uuid.uuid4().hex
+            store.create(Job(job_id=job_id, url=url, languages=langs, video_id=vid))
+            events.append((job_id, {"job_id": job_id, "url": url, "languages": langs}))
+            if vid:
+                seen.add(vid)
+            accepted += 1
+        publisher.publish_batch(settings.topic_job_requested, events)
+        return accepted, duplicates
+
+    @router.post("/process/playlist", response_class=HTMLResponse)
+    def submit_playlist(
+        request: Request, playlist: str = Form(...), languages: str = Form(default="")
+    ) -> HTMLResponse:
+        playlist = playlist.strip()
+        if extract_playlist_id(playlist) is None:
+            return templates.TemplateResponse(
+                request,
+                "partials/flash.html",
+                {"ok": False, "message": "Aucune playlist détectée (lien ou ID invalide)."},
+            )
+        langs = _parse_languages(languages, settings.languages)
+        entries = get_playlist_resolver().resolve(playlist)
+        if not entries:
+            return templates.TemplateResponse(
+                request,
+                "partials/flash.html",
+                {"warn": True, "message": "Playlist vide ou illisible — aucun job créé."},
+            )
+        accepted, duplicates = _queue_dedup([(e.url, langs, e.video_id) for e in entries])
+        return templates.TemplateResponse(
+            request,
+            "partials/flash.html",
+            {
+                "ok": True,
+                "message": (
+                    f"Playlist : {accepted} job(s) créé(s)"
+                    + (f", {duplicates} doublon(s) ignoré(s)" if duplicates else "")
+                    + f" ({', '.join(langs)})"
+                ),
+            },
+        )
+
     @router.post("/process/csv", response_class=HTMLResponse)
     async def submit_csv(request: Request, file: UploadFile = File(...)) -> HTMLResponse:
         raw = (await file.read()).decode("utf-8-sig")
@@ -505,22 +584,7 @@ def mount_ui(
             rows.append((url, langs, extract_video_id(url)))
 
         # Dedup against already-known videos + within this same file.
-        already = store.existing_video_ids({vid for _, _, vid in rows if vid})
-        seen: set[str] = set()
-        accepted = 0
-        duplicates = 0
-        events: list[tuple[str, dict]] = []
-        for url, langs, vid in rows:
-            if vid and (vid in already or vid in seen):
-                duplicates += 1
-                continue
-            job_id = uuid.uuid4().hex
-            store.create(Job(job_id=job_id, url=url, languages=langs, video_id=vid))
-            events.append((job_id, {"job_id": job_id, "url": url, "languages": langs}))
-            if vid:
-                seen.add(vid)
-            accepted += 1
-        publisher.publish_batch(settings.topic_job_requested, events)
+        accepted, duplicates = _queue_dedup(rows)
         return templates.TemplateResponse(
             request,
             "partials/csv_result.html",

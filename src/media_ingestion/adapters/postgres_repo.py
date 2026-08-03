@@ -74,10 +74,19 @@ class PostgresMetadataRepository:
         with self._engine.begin() as conn:
             conn.execute(stmt)
 
-    def list(self, *, language: str | None = None, limit: int = 50, offset: int = 0) -> list[dict]:
+    def list(
+        self,
+        *,
+        language: str | None = None,
+        transcript: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
         stmt = select(videos).order_by(videos.c.created_at.desc()).limit(limit).offset(offset)
         if language is not None:
             stmt = stmt.where(videos.c.language == language)
+        if transcript is not None:
+            stmt = stmt.where(videos.c.transcript_status == transcript)
         with self._engine.connect() as conn:
             rows = conn.execute(stmt).mappings().all()
         return [dict(r) for r in rows]

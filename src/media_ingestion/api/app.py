@@ -12,19 +12,26 @@ import uuid
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 
-from ..bootstrap import build_catalog, build_job_store, build_publisher
+from ..bootstrap import (
+    build_catalog,
+    build_job_store,
+    build_playlist_resolver,
+    build_publisher,
+)
 from ..config import Settings
 from ..domain.models import Job, JobStatus
 from ..domain.ports import (
     EventPublisherPort,
     JobStorePort,
     MetadataRepositoryPort,
+    PlaylistResolverPort,
     StoragePort,
 )
 from .schemas import (
     BatchAccepted,
     BatchItem,
     JobResponse,
+    PlaylistRequest,
     ProcessAccepted,
     ProcessRequest,
     VideoItem,
@@ -58,6 +65,7 @@ def create_app(
     publisher: EventPublisherPort | None = None,
     storage: StoragePort | None = None,
     catalog: MetadataRepositoryPort | None = None,
+    playlist_resolver: PlaylistResolverPort | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     store = store or build_job_store(settings)
@@ -72,6 +80,9 @@ def create_app(
 
     def _get_catalog() -> MetadataRepositoryPort:
         return catalog or build_catalog(settings)
+
+    def _get_playlist_resolver() -> PlaylistResolverPort:
+        return playlist_resolver or build_playlist_resolver(settings)
 
     def _new_job_event(url: str, languages: list[str]) -> tuple[str, dict]:
         from ..video_id import extract_video_id
@@ -119,6 +130,26 @@ def create_app(
         # publish all at once (single flush) instead of blocking per message
         publisher.publish_batch(settings.topic_job_requested, events)
         return BatchAccepted(accepted=len(jobs), jobs=jobs, errors=errors)
+
+    @app.post("/process/playlist", status_code=202, response_model=BatchAccepted)
+    def process_playlist(req: PlaylistRequest) -> BatchAccepted:
+        from ..playlist import extract_playlist_id
+
+        if extract_playlist_id(req.playlist) is None:
+            raise HTTPException(status_code=400, detail="no playlist id found in input")
+        languages = req.languages or list(settings.languages)
+        entries = _get_playlist_resolver().resolve(req.playlist)
+        if not entries:
+            raise HTTPException(status_code=404, detail="empty or unreadable playlist")
+
+        jobs: list[BatchItem] = []
+        events: list[tuple[str, dict]] = []
+        for entry in entries:
+            job_id, event = _new_job_event(entry.url, languages)
+            events.append((job_id, event))
+            jobs.append(BatchItem(url=entry.url, job_id=job_id, languages=languages))
+        publisher.publish_batch(settings.topic_job_requested, events)
+        return BatchAccepted(accepted=len(jobs), jobs=jobs)
 
     @app.get("/jobs", response_model=list[JobResponse])
     def list_jobs(
@@ -172,10 +203,13 @@ def create_app(
     @app.get("/videos", response_model=list[VideoItem])
     def list_videos(
         language: str | None = Query(default=None),
+        transcript: str | None = Query(default=None),
         limit: int = Query(default=50, ge=1, le=500),
         offset: int = Query(default=0, ge=0),
     ) -> list[VideoItem]:
-        rows = _get_catalog().list(language=language, limit=limit, offset=offset)
+        rows = _get_catalog().list(
+            language=language, transcript=transcript, limit=limit, offset=offset
+        )
         return [VideoItem(**row) for row in rows]
 
     from .ui import mount_ui
@@ -187,6 +221,7 @@ def create_app(
         publisher=publisher,
         get_storage=_get_storage,
         get_catalog=_get_catalog,
+        get_playlist_resolver=_get_playlist_resolver,
     )
 
     return app

@@ -24,6 +24,13 @@ def build_job_store(settings: Settings) -> JobStorePort:
     return store
 
 
+def build_playlist_resolver(settings: Settings):
+    """yt-dlp playlist enumerator (expands a playlist into video jobs)."""
+    from .adapters.playlist_resolver import YtDlpPlaylistResolver
+
+    return YtDlpPlaylistResolver()
+
+
 def build_catalog(settings: Settings):
     """The Postgres videos catalog (read side for GET /videos). Always Postgres."""
     from .adapters.postgres_repo import PostgresMetadataRepository

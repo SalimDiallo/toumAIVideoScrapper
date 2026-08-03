@@ -3,11 +3,19 @@
 {% block content %}
 
 <div class="flex flex-wrap items-center gap-2">
-  <a href="/ui/videos" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if not language %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Toutes</a>
+  <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Langue</span>
+  <a href="/ui/videos{% if transcript %}?transcript={{ transcript }}{% endif %}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if not language %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Toutes</a>
   {% for l in languages %}
-  <a href="/ui/videos?language={{ l }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if language == l %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">{{ l }}</a>
+  <a href="/ui/videos?language={{ l }}{% if transcript %}&transcript={{ transcript }}{% endif %}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if language == l %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">{{ l }}</a>
   {% endfor %}
   <span class="ml-auto text-sm text-slate-400">{{ videos|length }} vidéo(s)</span>
+</div>
+
+<div class="mt-2 flex flex-wrap items-center gap-2">
+  <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Transcript</span>
+  <a href="/ui/videos{% if language %}?language={{ language }}{% endif %}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if not transcript %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Tous</a>
+  <a href="/ui/videos?transcript=available{% if language %}&language={{ language }}{% endif %}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if transcript == 'available' %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Disponible</a>
+  <a href="/ui/videos?transcript=unavailable{% if language %}&language={{ language }}{% endif %}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if transcript == 'unavailable' %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Indisponible</a>
 </div>
 
 <form id="zipform" method="post" action="/ui/videos/zip" class="mt-4 rounded-xl border border-slate-200 bg-white">
@@ -16,7 +24,7 @@
     <span id="selcount" class="text-sm text-slate-500">0 sélectionnée(s)</span>
     <div class="ml-auto flex items-center gap-2">
       <button id="delsel" type="button" disabled
-              hx-post="/ui/videos/bulk-delete{% if language %}?language={{ language }}{% endif %}"
+              hx-post="/ui/videos/bulk-delete?language={{ language or '' }}&transcript={{ transcript or '' }}"
               hx-include=".rowcb:checked" hx-target="#videos-tbody" hx-swap="innerHTML"
               hx-confirm="Supprimer les vidéos sélectionnées et leur audio ? Action irréversible."
               class="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 px-3 py-1.5 text-sm font-medium text-rose-600 enabled:hover:bg-rose-50 disabled:opacity-40">

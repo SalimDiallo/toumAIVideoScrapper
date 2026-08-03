@@ -96,10 +96,12 @@ class FakeCatalog:
     def __init__(self, rows=None):
         self.rows = rows or []
 
-    def list(self, *, language=None, limit=50, offset=0):
-        rows = (
-            self.rows if language is None else [r for r in self.rows if r["language"] == language]
-        )
+    def list(self, *, language=None, transcript=None, limit=50, offset=0):
+        rows = self.rows
+        if language is not None:
+            rows = [r for r in rows if r.get("language") == language]
+        if transcript is not None:
+            rows = [r for r in rows if r.get("transcript_status") == transcript]
         return rows[offset : offset + limit]
 
     def get(self, video_id):
@@ -109,10 +111,27 @@ class FakeCatalog:
         self.rows = [r for r in self.rows if r["video_id"] != video_id]
 
 
-def _client(storage=None, catalog=None):
+class FakePlaylistResolver:
+    def __init__(self, entries=None):
+        self.entries = entries or []
+        self.calls = []
+
+    def resolve(self, playlist_url_or_id):
+        self.calls.append(playlist_url_or_id)
+        return list(self.entries)
+
+
+def _client(storage=None, catalog=None, playlist_resolver=None):
     store, pub = FakeStore(), FakePublisher()
     client = TestClient(
-        create_app(Settings(), store=store, publisher=pub, storage=storage, catalog=catalog)
+        create_app(
+            Settings(),
+            store=store,
+            publisher=pub,
+            storage=storage,
+            catalog=catalog,
+            playlist_resolver=playlist_resolver,
+        )
     )
     return client, store, pub
 
@@ -462,6 +481,61 @@ def test_ui_submit_csv_dedup_within_batch_and_existing():
     assert len(store.jobs) == 2  # original + one new
 
 
+def _pl_entries(*video_ids):
+    from media_ingestion.domain.ports import PlaylistEntry
+
+    return [
+        PlaylistEntry(video_id=v, url=f"https://www.youtube.com/watch?v={v}", title=v)
+        for v in video_ids
+    ]
+
+
+PLAYLIST = "PLbpi6ZahtOH6Blw3RGYpWkSByi_T7Rygb"
+
+
+def test_process_playlist_creates_one_job_per_entry():
+    resolver = FakePlaylistResolver(_pl_entries("aaaaaaaaaaa", "bbbbbbbbbbb"))
+    client, store, pub = _client(playlist_resolver=resolver)
+    r = client.post("/process/playlist", json={"playlist": PLAYLIST, "languages": ["fr"]})
+    assert r.status_code == 202
+    body = r.json()
+    assert body["accepted"] == 2
+    assert len(store.jobs) == 2
+    assert len(pub.events) == 2
+    assert resolver.calls == [PLAYLIST]
+
+
+def test_process_playlist_rejects_non_playlist():
+    client, _, _ = _client(playlist_resolver=FakePlaylistResolver())
+    r = client.post("/process/playlist", json={"playlist": "https://youtu.be/dQw4w9WgXcQ"})
+    assert r.status_code == 400
+
+
+def test_process_playlist_empty_is_404():
+    client, _, _ = _client(playlist_resolver=FakePlaylistResolver(entries=[]))
+    r = client.post("/process/playlist", json={"playlist": PLAYLIST})
+    assert r.status_code == 404
+
+
+def test_ui_submit_playlist_dedup():
+    resolver = FakePlaylistResolver(
+        _pl_entries("aaaaaaaaaaa", "bbbbbbbbbbb", "aaaaaaaaaaa")  # dup within playlist
+    )
+    client, store, _ = _client(playlist_resolver=resolver)
+    r = client.post("/ui/process/playlist", data={"playlist": PLAYLIST})
+    assert r.status_code == 200
+    assert "2 job(s) créé(s)" in r.text
+    assert "1 doublon(s)" in r.text
+    assert len(store.jobs) == 2
+
+
+def test_ui_submit_playlist_invalid_input():
+    client, _, _ = _client(playlist_resolver=FakePlaylistResolver())
+    r = client.post("/ui/process/playlist", data={"playlist": "pas une playlist"})
+    assert r.status_code == 200
+    assert "Aucune playlist détectée" in r.text
+
+
 def test_list_videos():
     rows = [
         {
@@ -483,3 +557,47 @@ def test_list_videos():
     assert len(client.get("/videos").json()) == 2
     fr = client.get("/videos?language=fr").json()
     assert len(fr) == 1 and fr[0]["video_id"] == "v1"
+
+
+def _catalog_with_transcripts():
+    rows = [
+        {
+            "video_id": "v1",
+            "url": "http://y/1",
+            "title": "QWERTYAVEC",
+            "language": "fr",
+            "transcript_status": "available",
+            "storage_uri": "s3://b/1",
+        },
+        {
+            "video_id": "v2",
+            "url": "http://y/2",
+            "title": "QWERTYMANQUANT",
+            "language": "fr",
+            "transcript_status": "unavailable",
+            "storage_uri": "s3://b/2",
+        },
+    ]
+    return FakeCatalog(rows=rows)
+
+
+def test_list_videos_filter_by_transcript():
+    client, _, _ = _client(catalog=_catalog_with_transcripts())
+    avail = client.get("/videos?transcript=available").json()
+    assert len(avail) == 1 and avail[0]["video_id"] == "v1"
+    unavail = client.get("/videos?transcript=unavailable").json()
+    assert len(unavail) == 1 and unavail[0]["video_id"] == "v2"
+
+
+def test_ui_videos_page_filter_by_transcript():
+    client, _, _ = _client(catalog=_catalog_with_transcripts())
+    # the filter chips are rendered
+    page = client.get("/ui/videos")
+    assert "Disponible" in page.text and "Indisponible" in page.text
+
+    # available -> only v1
+    avail = client.get("/ui/videos?transcript=available")
+    assert "QWERTYAVEC" in avail.text and "QWERTYMANQUANT" not in avail.text
+    # unavailable -> only v2
+    unavail = client.get("/ui/videos?transcript=unavailable")
+    assert "QWERTYMANQUANT" in unavail.text and "QWERTYAVEC" not in unavail.text

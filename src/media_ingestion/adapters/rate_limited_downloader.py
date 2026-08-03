@@ -14,6 +14,7 @@ la politique est ici et pilotée par la config (`TOUMAI_DOWNLOAD_*`).
 from __future__ import annotations
 
 import random
+import threading
 import time
 from pathlib import Path
 from typing import Callable, Protocol
@@ -55,12 +56,17 @@ class RateLimitedDownloader:
         self._proxies = list(proxies or [])
         self._sleep = sleep
         self._rand = rand
+        # Curseur round-robin global (avance à chaque tentative, tout download
+        # confondu) pour répartir les vidéos sur le pool d'IP et pas seulement les
+        # retries. Verrou : le worker partage une instance entre N threads.
+        self._proxy_cursor = 0
+        self._proxy_lock = threading.Lock()
 
     def download(self, video_url: str, dest_dir: Path) -> tuple[VideoMetadata, AudioAsset]:
         self._pace()
         attempt = 0
         while True:
-            proxy = self._pick_proxy(attempt)
+            proxy = self._next_proxy()
             try:
                 return self._inner.download(video_url, dest_dir, proxy=proxy)
             except RateLimitedError:
@@ -90,8 +96,11 @@ class RateLimitedDownloader:
         jitter = self._rand(0.0, self._backoff_base) if self._backoff_base > 0 else 0.0
         return min(self._backoff_max, capped + jitter)
 
-    def _pick_proxy(self, attempt: int) -> str | None:
-        """Round-robin sur les proxies ; None = connexion directe."""
+    def _next_proxy(self) -> str | None:
+        """Prochain proxy en round-robin (avance à chaque appel) ; None = direct."""
         if not self._proxies:
             return None
-        return self._proxies[attempt % len(self._proxies)]
+        with self._proxy_lock:
+            proxy = self._proxies[self._proxy_cursor % len(self._proxies)]
+            self._proxy_cursor += 1
+        return proxy

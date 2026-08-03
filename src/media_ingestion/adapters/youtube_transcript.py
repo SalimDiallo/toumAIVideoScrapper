@@ -24,6 +24,8 @@ Supports both the 1.x instance API (`list`/`fetch`) and the legacy 0.6.x static 
 
 from __future__ import annotations
 
+from typing import Any
+
 import structlog
 from youtube_transcript_api import YouTubeTranscriptApi
 
@@ -33,12 +35,21 @@ log = structlog.get_logger(__name__)
 
 
 class YouTubeTranscriptProvider:
-    def __init__(self, *, accept_asr: bool = True, enable_translation: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        accept_asr: bool = True,
+        enable_translation: bool = False,
+        proxy_config: Any | None = None,
+    ) -> None:
         # Accept YouTube's auto-generated captions. Turn off to mark ASR-only
         # videos as unavailable instead of using YouTube ASR.
         self._accept_asr = accept_asr
         # Machine-translate an existing track as a last resort.
         self._enable_translation = enable_translation
+        # Optionnel : config proxy youtube-transcript-api (WebshareProxyConfig /
+        # GenericProxyConfig) pour contourner les bans d'IP. None = direct.
+        self._proxy_config = proxy_config
 
     def fetch(self, video_id: str, languages: list[str]) -> Transcript | None:
         try:
@@ -76,7 +87,11 @@ class YouTubeTranscriptProvider:
         self, video_id: str, languages: list[str]
     ) -> tuple[list[dict], str, TranscriptSource] | None:
         """Pick the most trustworthy acceptable track, or None."""
-        api = YouTubeTranscriptApi()
+        api = (
+            YouTubeTranscriptApi(proxy_config=self._proxy_config)
+            if self._proxy_config is not None
+            else YouTubeTranscriptApi()
+        )
 
         # Legacy 0.6.x has no `list`; fall back to the old flat behaviour.
         if not hasattr(api, "list"):
