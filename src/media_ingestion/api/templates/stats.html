@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block heading %}Statistiques{% endblock %}
+{% block content %}
+
+<!-- KPI principaux -->
+<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+  <div class="rounded-xl border border-slate-200 bg-white p-4">
+    <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">Audio collecté</div>
+    <div class="mt-1 text-2xl font-semibold text-[#018B96]">{{ stats.duration }}</div>
+    <div class="mt-1 text-xs text-slate-400">{{ stats.hours }} heures au total</div>
+  </div>
+  <div class="rounded-xl border border-slate-200 bg-white p-4">
+    <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">Vidéos au catalogue</div>
+    <div class="mt-1 text-2xl font-semibold text-slate-800">{{ stats.videos }}</div>
+    <div class="mt-1 text-xs text-slate-400">durée moyenne {{ stats.avg_duration }}</div>
+  </div>
+  <div class="rounded-xl border border-slate-200 bg-white p-4">
+    <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">Transcrits disponibles</div>
+    <div class="mt-1 text-2xl font-semibold text-emerald-600">{{ stats.transcript_pct }} %</div>
+    <div class="mt-1 text-xs text-slate-400">{{ stats.with_transcript }} avec · {{ stats.without_transcript }} sans</div>
+  </div>
+  <div class="rounded-xl border border-slate-200 bg-white p-4">
+    <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">Langues couvertes</div>
+    <div class="mt-1 text-2xl font-semibold text-slate-800">{{ stats.by_language|length }}</div>
+    <div class="mt-1 text-xs text-slate-400">{{ stats.by_provider|length }} plateforme(s)</div>
+  </div>
+</div>
+
+<div class="mt-6 grid gap-6 lg:grid-cols-2">
+  <!-- Audio par langue -->
+  <div class="rounded-xl border border-slate-200 bg-white p-5">
+    <h2 class="font-semibold text-slate-800">Audio par langue</h2>
+    <div class="mt-4 space-y-3">
+      {% for r in stats.by_language %}
+      <div>
+        <div class="flex items-center justify-between text-sm">
+          <span class="font-medium text-slate-700">{{ r.name }}</span>
+          <span class="text-slate-500">{{ r.duration }} · {{ r.videos }} vidéo(s)</span>
+        </div>
+        <div class="mt-1 h-1.5 w-full rounded-full bg-slate-100"><div class="h-1.5 rounded-full bg-[#018B96]" style="width: {{ r.pct }}%"></div></div>
+      </div>
+      {% else %}
+      <p class="text-sm text-slate-400">Aucune donnée.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Audio par plateforme -->
+  <div class="rounded-xl border border-slate-200 bg-white p-5">
+    <h2 class="font-semibold text-slate-800">Audio par plateforme</h2>
+    <div class="mt-4 space-y-3">
+      {% for r in stats.by_provider %}
+      <div>
+        <div class="flex items-center justify-between text-sm">
+          <span class="font-medium capitalize text-slate-700">{{ r.name }}</span>
+          <span class="text-slate-500">{{ r.duration }} · {{ r.videos }} vidéo(s)</span>
+        </div>
+        <div class="mt-1 h-1.5 w-full rounded-full bg-slate-100"><div class="h-1.5 rounded-full bg-indigo-500" style="width: {{ r.pct }}%"></div></div>
+      </div>
+      {% else %}
+      <p class="text-sm text-slate-400">Aucune donnée.</p>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<!-- Origine des transcriptions -->
+<div class="mt-6 rounded-xl border border-slate-200 bg-white p-5">
+  <h2 class="font-semibold text-slate-800">Origine des transcriptions</h2>
+  <p class="mt-1 text-xs text-slate-400">D'où proviennent les sous-titres : sous-titres auteur (humain), reconnaissance vocale (ASR) ou traduction automatique.</p>
+  <div class="mt-4 flex flex-wrap gap-2">
+    {% for r in stats.by_source %}
+    <span class="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-sm">
+      <span class="font-mono text-xs text-slate-500">{{ r.source }}</span>
+      <span class="font-semibold text-slate-800">{{ r.videos }}</span>
+    </span>
+    {% else %}
+    <p class="text-sm text-slate-400">Aucune donnée.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

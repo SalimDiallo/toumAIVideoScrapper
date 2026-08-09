@@ -14,18 +14,24 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 
 from ..bootstrap import (
     build_catalog,
+    build_channel_resolver,
+    build_channel_store,
     build_job_store,
     build_playlist_resolver,
     build_publisher,
+    build_veille_run_log,
 )
 from ..config import Settings
 from ..domain.models import Job, JobStatus
 from ..domain.ports import (
+    ChannelResolverPort,
+    ChannelWatchStorePort,
     EventPublisherPort,
     JobStorePort,
     MetadataRepositoryPort,
     PlaylistResolverPort,
     StoragePort,
+    VeilleRunLogPort,
 )
 from .schemas import (
     BatchAccepted,
@@ -66,6 +72,9 @@ def create_app(
     storage: StoragePort | None = None,
     catalog: MetadataRepositoryPort | None = None,
     playlist_resolver: PlaylistResolverPort | None = None,
+    channel_store: ChannelWatchStorePort | None = None,
+    channel_resolver: ChannelResolverPort | None = None,
+    veille_run_log: VeilleRunLogPort | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     store = store or build_job_store(settings)
@@ -83,6 +92,29 @@ def create_app(
 
     def _get_playlist_resolver() -> PlaylistResolverPort:
         return playlist_resolver or build_playlist_resolver(settings)
+
+    def _get_channel_store() -> ChannelWatchStorePort:
+        return channel_store or build_channel_store(settings)
+
+    def _get_channel_resolver() -> ChannelResolverPort:
+        return channel_resolver or build_channel_resolver(settings)
+
+    def _get_veille_run_log() -> VeilleRunLogPort:
+        return veille_run_log or build_veille_run_log(settings)
+
+    def _build_veille_use_case():
+        from ..application.watch_channels import WatchChannelsUseCase
+
+        return WatchChannelsUseCase(
+            channel_store=_get_channel_store(),
+            resolver=_get_channel_resolver(),
+            job_store=store,
+            publisher=publisher,
+            topic=settings.topic_job_requested,
+            default_languages=list(settings.languages),
+            recent_limit=settings.veille_recent_limit,
+            run_log=_get_veille_run_log(),
+        )
 
     def _new_job_event(url: str, languages: list[str]) -> tuple[str, dict]:
         from ..video_id import extract_video_id
@@ -200,15 +232,78 @@ def create_app(
         )
         return ProcessAccepted(job_id=job_id, status="pending")
 
+    @app.post("/veille/run", status_code=202)
+    def run_veille() -> dict:
+        """Run one veille pass: scan watched channels, queue their new uploads.
+
+        This is the endpoint the daily Airflow DAG triggers. Returns a summary
+        ``{checked, queued, per_channel}``.
+        """
+        return _build_veille_use_case().run_once()
+
+    @app.post("/veille/channels/csv", status_code=202)
+    async def import_channels_csv(file: UploadFile = File(...)) -> dict:
+        """Bulk-register watched channels from a CSV (column `channel`, optional `name`)."""
+        from ..channel import channel_key, normalize_channel_url
+        from ..domain.models import WatchedChannel
+
+        raw = (await file.read()).decode("utf-8-sig")
+        reader = csv.DictReader(io.StringIO(raw))
+        fields = [f.strip().lower() for f in (reader.fieldnames or [])]
+        col = next((c for c in ("channel", "url", "handle") if c in fields), None)
+        if col is None:
+            raise HTTPException(status_code=400, detail="CSV must have a 'channel' (or 'url') column")
+
+        cstore = _get_channel_store()
+        existing = {c.channel_key for c in cstore.list_all()}
+        seen: set[str] = set()
+        added = duplicates = invalid = 0
+        for row in reader:
+            norm = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+            value = norm.get(col, "")
+            if not value:
+                continue
+            key = channel_key(value)
+            url = normalize_channel_url(value)
+            if not key or not url:
+                invalid += 1
+                continue
+            if key in existing or key in seen:
+                duplicates += 1
+                continue
+            cstore.add(WatchedChannel(channel_key=key, url=url, name=(norm.get("name") or None)))
+            seen.add(key)
+            added += 1
+        return {"added": added, "duplicates": duplicates, "invalid": invalid}
+
+    @app.get("/veille/runs")
+    def veille_runs(limit: int = Query(default=20, ge=1, le=200)) -> list[dict]:
+        """Recent veille passes (monitoring log), most recent first."""
+        return [
+            {
+                "run_id": r.run_id,
+                "ran_at": r.ran_at,
+                "checked": r.checked,
+                "queued": r.queued,
+                "detail": r.detail,
+            }
+            for r in _get_veille_run_log().list_recent(limit)
+        ]
+
     @app.get("/videos", response_model=list[VideoItem])
     def list_videos(
         language: str | None = Query(default=None),
         transcript: str | None = Query(default=None),
+        provider: str | None = Query(default=None),
         limit: int = Query(default=50, ge=1, le=500),
         offset: int = Query(default=0, ge=0),
     ) -> list[VideoItem]:
         rows = _get_catalog().list(
-            language=language, transcript=transcript, limit=limit, offset=offset
+            language=language,
+            transcript=transcript,
+            provider=provider,
+            limit=limit,
+            offset=offset,
         )
         return [VideoItem(**row) for row in rows]
 
@@ -222,6 +317,9 @@ def create_app(
         get_storage=_get_storage,
         get_catalog=_get_catalog,
         get_playlist_resolver=_get_playlist_resolver,
+        get_channel_store=_get_channel_store,
+        get_veille_run_log=_get_veille_run_log,
+        run_veille=lambda: _build_veille_use_case().run_once(),
     )
 
     return app

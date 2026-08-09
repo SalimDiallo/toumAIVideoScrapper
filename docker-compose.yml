@@ -42,10 +42,13 @@ services:
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      # deux listeners applicatifs : INTERNAL (réseau compose, pour les conteneurs
+      # api/worker) + EXTERNAL (hôte, pour la CLI de dev sur localhost).
+      KAFKA_LISTENERS: INTERNAL://:29092,EXTERNAL://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
@@ -68,6 +71,132 @@ services:
       exit 0;
       "
 
+  # ------------------------------------------------------------- Application
+  # Même image pour l'API et le worker ; seul l'entrypoint change. Les hôtes
+  # "localhost" du .env sont surchargés ici par les noms de services internes.
+  toumai-api:
+    build: .
+    image: toumai-app
+    container_name: toumai-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    env_file: .env
+    environment:
+      TOUMAI_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      TOUMAI_POSTGRES_DSN: postgresql+psycopg://toumai:toumai@postgres:5432/toumai
+      TOUMAI_METADATA_BACKEND: postgres
+      TOUMAI_MINIO_ENDPOINT: minio:9000
+    ports:
+      - "8000:8000"
+    volumes:
+      - toumai-data:/data          # utile seulement si STORAGE_BACKEND=local
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  toumai-worker:
+    build: .
+    image: toumai-app
+    command: ["toumai-worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    env_file: .env
+    environment:
+      TOUMAI_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      TOUMAI_POSTGRES_DSN: postgresql+psycopg://toumai:toumai@postgres:5432/toumai
+      TOUMAI_METADATA_BACKEND: postgres
+      TOUMAI_MINIO_ENDPOINT: minio:9000
+    volumes:
+      - toumai-data:/data
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------ Airflow
+  # Ordonnanceur du job quotidien de veille. Empreinte minimale : LocalExecutor
+  # (pas de Celery/Redis), metadata DB dédiée `airflow` sur le Postgres existant.
+  # Le DAG ne fait qu'un appel HTTP `POST /veille/run` sur l'API (qui tourne sur
+  # l'hôte) — aucune dépendance yt-dlp/ffmpeg dans l'image Airflow.
+
+  # crée la base `airflow` sur toumai-postgres puis se termine
+  airflow-db-init:
+    image: postgres:16
+    container_name: toumai-airflow-db-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: toumai
+    entrypoint: >
+      /bin/sh -c "
+      psql -h postgres -U toumai -tc \"SELECT 1 FROM pg_database WHERE datname='airflow'\" | grep -q 1
+      || psql -h postgres -U toumai -c 'CREATE DATABASE airflow';
+      exit 0;
+      "
+
+  airflow-init:
+    image: &airflow_image apache/airflow:2.10.3-python3.12
+    container_name: toumai-airflow-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-db-init:
+        condition: service_completed_successfully
+    environment: &airflow_env
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://toumai:toumai@postgres:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      # Connexion HTTP vers l'API (tourne sur l'hôte). host.docker.internal est
+      # résolu par Docker Desktop ; extra_hosts le mappe aussi sous Linux.
+      AIRFLOW_CONN_TOUMAI_API: http://toumai-api:8000
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    entrypoint:
+      - /bin/bash
+      - -c
+      - airflow db migrate && (airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@toumai.local || true)
+
+  airflow-scheduler:
+    image: *airflow_image
+    container_name: toumai-airflow-scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment: *airflow_env
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: scheduler
+    restart: unless-stopped
+
+  airflow-webserver:
+    image: *airflow_image
+    container_name: toumai-airflow-webserver
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment: *airflow_env
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8080:8080"
+    command: webserver
+    restart: unless-stopped
+
 volumes:
   pgdata:
   miniodata:
+  toumai-data:

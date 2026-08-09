@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import media_ingestion.adapters.youtube_transcript as yt_mod
 from media_ingestion.adapters.youtube_transcript import YouTubeTranscriptProvider
-from media_ingestion.domain.models import TranscriptSource
+from media_ingestion.domain.models import TranscriptSource, VideoMetadata
+
+# The provider only reads `video_id` off the metadata; the rest is filler.
+_META = VideoMetadata(video_id="vid", url="https://youtu.be/vid", title="t", provider="youtube")
 
 
 class FakeSnippet:
@@ -51,21 +54,21 @@ def _install(monkeypatch, tracks: list[FakeTrack]):
 
 def test_prefers_manual_over_asr(monkeypatch):
     _install(monkeypatch, [FakeTrack("fr", is_generated=True), FakeTrack("fr", is_generated=False)])
-    t = YouTubeTranscriptProvider().fetch("vid", ["fr"])
+    t = YouTubeTranscriptProvider().fetch(_META, ["fr"])
     assert t is not None
     assert t.source is TranscriptSource.YOUTUBE_MANUAL
 
 
 def test_falls_back_to_asr_when_no_manual(monkeypatch):
     _install(monkeypatch, [FakeTrack("fr", is_generated=True)])
-    t = YouTubeTranscriptProvider().fetch("vid", ["fr"])
+    t = YouTubeTranscriptProvider().fetch(_META, ["fr"])
     assert t is not None
     assert t.source is TranscriptSource.YOUTUBE_ASR
 
 
 def test_rejects_asr_when_disabled(monkeypatch):
     _install(monkeypatch, [FakeTrack("fr", is_generated=True)])
-    t = YouTubeTranscriptProvider(accept_asr=False).fetch("vid", ["fr"])
+    t = YouTubeTranscriptProvider(accept_asr=False).fetch(_META, ["fr"])
     assert t is None  # -> caller marks the video unavailable
 
 
@@ -74,7 +77,7 @@ def test_language_preference_order(monkeypatch):
         monkeypatch,
         [FakeTrack("en", is_generated=False), FakeTrack("fr", is_generated=False)],
     )
-    t = YouTubeTranscriptProvider().fetch("vid", ["fr", "en"])
+    t = YouTubeTranscriptProvider().fetch(_META, ["fr", "en"])
     assert t is not None
     assert t.language == "fr"
 
@@ -85,7 +88,7 @@ def test_manual_in_other_language_beats_asr_in_preferred(monkeypatch):
         monkeypatch,
         [FakeTrack("en", is_generated=False), FakeTrack("fr", is_generated=True)],
     )
-    t = YouTubeTranscriptProvider().fetch("vid", ["fr"])
+    t = YouTubeTranscriptProvider().fetch(_META, ["fr"])
     assert t is not None
     assert t.source is TranscriptSource.YOUTUBE_MANUAL
     assert t.language == "en"
@@ -93,9 +96,7 @@ def test_manual_in_other_language_beats_asr_in_preferred(monkeypatch):
 
 def test_translation_last_resort(monkeypatch):
     _install(monkeypatch, [FakeTrack("es", is_generated=True, is_translatable=True)])
-    t = YouTubeTranscriptProvider(
-        accept_asr=False, enable_translation=True
-    ).fetch("vid", ["fr"])
+    t = YouTubeTranscriptProvider(accept_asr=False, enable_translation=True).fetch(_META, ["fr"])
     assert t is not None
     assert t.source is TranscriptSource.YOUTUBE_TRANSLATED
     assert t.language == "fr"
@@ -103,4 +104,4 @@ def test_translation_last_resort(monkeypatch):
 
 def test_none_when_no_tracks(monkeypatch):
     _install(monkeypatch, [])
-    assert YouTubeTranscriptProvider().fetch("vid", ["fr"]) is None
+    assert YouTubeTranscriptProvider().fetch(_META, ["fr"]) is None

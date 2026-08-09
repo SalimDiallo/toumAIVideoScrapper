@@ -16,7 +16,9 @@ from sqlalchemy import (
     Table,
     Text,
     create_engine,
+    func,
     select,
+    text,
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -36,6 +38,7 @@ videos = Table(
     Column("duration_s", Integer),
     Column("upload_date", String),
     Column("language", String, index=True),
+    Column("provider", String, index=True),
     Column("transcript_status", String),
     Column("transcript_source", String),
     Column("storage_uri", Text),
@@ -50,6 +53,10 @@ class PostgresMetadataRepository:
 
     def create_schema(self) -> None:
         _metadata.create_all(self._engine)
+        # Lightweight migration: `provider` was added after the first catalogs
+        # were created; add it in place so existing tables keep working.
+        with self._engine.begin() as conn:
+            conn.execute(text("ALTER TABLE videos ADD COLUMN IF NOT EXISTS provider VARCHAR"))
 
     def upsert(self, result: IngestionResult, language: str, storage_uri: str) -> None:
         m = result.metadata
@@ -61,6 +68,7 @@ class PostgresMetadataRepository:
             "duration_s": m.duration_s,
             "upload_date": m.upload_date,
             "language": language,
+            "provider": m.provider,
             "transcript_status": result.transcript_status.value,
             "transcript_source": result.transcript.source.value if result.transcript else None,
             "storage_uri": storage_uri,
@@ -79,6 +87,8 @@ class PostgresMetadataRepository:
         *,
         language: str | None = None,
         transcript: str | None = None,
+        provider: str | None = None,
+        q: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict]:
@@ -87,6 +97,15 @@ class PostgresMetadataRepository:
             stmt = stmt.where(videos.c.language == language)
         if transcript is not None:
             stmt = stmt.where(videos.c.transcript_status == transcript)
+        if provider is not None:
+            stmt = stmt.where(videos.c.provider == provider)
+        if q:
+            like = f"%{q}%"
+            stmt = stmt.where(
+                videos.c.title.ilike(like)
+                | videos.c.channel.ilike(like)
+                | videos.c.url.ilike(like)
+            )
         with self._engine.connect() as conn:
             rows = conn.execute(stmt).mappings().all()
         return [dict(r) for r in rows]
@@ -100,3 +119,63 @@ class PostgresMetadataRepository:
     def delete(self, video_id: str) -> None:
         with self._engine.begin() as conn:
             conn.execute(videos.delete().where(videos.c.video_id == video_id))
+
+    def stats(self) -> dict:
+        dur = func.coalesce(func.sum(videos.c.duration_s), 0)
+        with self._engine.connect() as conn:
+            total_videos, total_dur = conn.execute(
+                select(func.count(), dur)
+            ).one()
+
+            with_transcript = conn.execute(
+                select(func.count()).where(videos.c.transcript_status == "available")
+            ).scalar_one()
+
+            by_language = [
+                {"language": r["language"] or "?", "videos": r["videos"], "duration_s": r["duration_s"]}
+                for r in conn.execute(
+                    select(
+                        videos.c.language.label("language"),
+                        func.count().label("videos"),
+                        dur.label("duration_s"),
+                    )
+                    .group_by(videos.c.language)
+                    .order_by(dur.desc())
+                ).mappings()
+            ]
+
+            by_provider = [
+                {"provider": r["provider"] or "?", "videos": r["videos"], "duration_s": r["duration_s"]}
+                for r in conn.execute(
+                    select(
+                        videos.c.provider.label("provider"),
+                        func.count().label("videos"),
+                        dur.label("duration_s"),
+                    )
+                    .group_by(videos.c.provider)
+                    .order_by(dur.desc())
+                ).mappings()
+            ]
+
+            by_source = [
+                {"source": r["source"] or "aucune", "videos": r["videos"]}
+                for r in conn.execute(
+                    select(
+                        videos.c.transcript_source.label("source"),
+                        func.count().label("videos"),
+                    )
+                    .group_by(videos.c.transcript_source)
+                    .order_by(func.count().desc())
+                ).mappings()
+            ]
+
+        total_videos = int(total_videos or 0)
+        return {
+            "videos": total_videos,
+            "duration_s": int(total_dur or 0),
+            "with_transcript": int(with_transcript or 0),
+            "without_transcript": total_videos - int(with_transcript or 0),
+            "by_language": by_language,
+            "by_provider": by_provider,
+            "by_source": by_source,
+        }

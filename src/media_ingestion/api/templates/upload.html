@@ -10,8 +10,11 @@
     <form hx-post="/ui/process" hx-target="#url-flash" hx-swap="innerHTML" hx-on::after-request="if(event.detail.successful) this.reset()" class="mt-4 space-y-4">
       <div>
         <label class="block text-sm font-medium text-slate-700">URL de la vidéo</label>
-        <input name="url" type="text" required placeholder="https://www.youtube.com/watch?v=…"
+        <input name="url" type="text" required placeholder="https://www.youtube.com/watch?v=… · vimeo.com/… · tiktok.com/…"
                class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-[#018B96] focus:ring-[#018B96]">
+        <p class="mt-1.5 text-xs text-slate-400">
+          Plateformes : YouTube, Vimeo, Dailymotion, TikTok, Rumble, Odysee, PeerTube, Reddit.
+        </p>
       </div>
       <div>
         <label class="block text-sm font-medium text-slate-700">Langues <span class="text-slate-400 font-normal">(optionnel)</span></label>

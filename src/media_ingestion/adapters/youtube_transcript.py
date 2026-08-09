@@ -29,7 +29,7 @@ from typing import Any
 import structlog
 from youtube_transcript_api import YouTubeTranscriptApi
 
-from ..domain.models import Transcript, TranscriptSegment, TranscriptSource
+from ..domain.models import Transcript, TranscriptSegment, TranscriptSource, VideoMetadata
 
 log = structlog.get_logger(__name__)
 
@@ -51,7 +51,8 @@ class YouTubeTranscriptProvider:
         # GenericProxyConfig) pour contourner les bans d'IP. None = direct.
         self._proxy_config = proxy_config
 
-    def fetch(self, video_id: str, languages: list[str]) -> Transcript | None:
+    def fetch(self, metadata: VideoMetadata, languages: list[str]) -> Transcript | None:
+        video_id = metadata.video_id
         try:
             selected = self._select(video_id, languages)
         except Exception as exc:  # noqa: BLE001 - any failure means "no transcript"

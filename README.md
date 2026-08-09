@@ -1,12 +1,18 @@
 # TOUMAI — Media Ingestion Platform
 
-Scraper YouTube (audio + transcript) construit en **Clean Architecture / ports-adapters**.
+Scraper multi-plateformes (audio + transcript) construit en **Clean Architecture / ports-adapters**.
+Tout ce que **yt-dlp** sait lire est ingérable : YouTube, Vimeo, Dailymotion, TikTok,
+Rumble, Odysee, PeerTube, Reddit (voir la liste plus bas).
 Phase 1 = MVP fonctionnel. Phase 2 = branchement Kafka / MinIO / Postgres sans réécrire le cœur.
 
 ## Stratégie transcript
 
-1. On télécharge l'audio + les métadonnées via **yt-dlp**.
-2. On récupère les **sous-titres fournis par YouTube** (youtube-transcript-api).
+1. On télécharge l'audio + les métadonnées via **yt-dlp** ; la **plateforme d'origine**
+   (`provider`) est déduite de l'extracteur yt-dlp.
+2. On récupère les sous-titres, **routés selon la plateforme** :
+   - **YouTube** → `youtube-transcript-api` (manual > ASR > traduction).
+   - **autres plateformes** → sous-titres exposés par **yt-dlp** (`subtitles` = humains,
+     `automatic_captions` = ASR), parsés depuis le WebVTT/SRT.
 3. S'il n'y en a pas → on ne transcrit pas, statut `unavailable`.
 
 ## Architecture
@@ -76,12 +82,48 @@ pytest            # tests du use case avec fakes (sans réseau ni ffmpeg)
 
 
 
-### listes des plateformes cibles :
-YouTube ok 
-Vimeo 
-Dailymotion
-TikTok (contenus publics)
-Rumble
-Odysee
-PeerTube
-Reddit (vidéos publiques)
+### Plateformes cibles
+
+Toutes passent par le même pipeline yt-dlp (audio + métadonnées + sous-titres) ;
+seul le provider transcript diffère (voir *Stratégie transcript*).
+
+| Plateforme | Statut | Transcript |
+|---|---|---|
+| YouTube | ✅ | youtube-transcript-api (manual/ASR/traduction) |
+| Vimeo | ✅ | sous-titres yt-dlp |
+| Dailymotion | ✅ | sous-titres yt-dlp |
+| TikTok (contenus publics) | ✅ | sous-titres yt-dlp si présents |
+| Rumble | ✅ | sous-titres yt-dlp si présents |
+| Odysee | ✅ | sous-titres yt-dlp si présents |
+| PeerTube | ✅ | sous-titres yt-dlp |
+| Reddit (vidéos publiques) | ✅ | sous-titres yt-dlp si présents |
+
+> Le téléchargement fonctionne pour toute URL supportée par yt-dlp. Beaucoup de
+> plateformes (TikTok, Rumble, Reddit, Odysee) n'exposent pas toujours de
+> sous-titres : dans ce cas le transcript est marqué `unavailable`, l'audio reste ingéré.
+
+#### TikTok & plateformes à forte protection anti-bot
+
+Les extracteurs des grosses plateformes cassent souvent : garde **yt-dlp à jour**
+(idéalement la *nightly*, qui corrige TikTok/Instagram avant la release stable) :
+
+```bash
+pip install -U --pre "yt-dlp[default]"     # nightly / pré-release
+```
+
+TikTok refuse en plus l'extraction sans **session** — l'erreur
+`Unable to extract universal data for rehydration` signifie « pas de cookies ».
+Fournis des cookies via un des deux réglages (`.env`) :
+
+```dotenv
+# 1) Fichier cookies.txt (recommandé sous Windows : contourne le chiffrement DPAPI/
+#    app-bound de Chrome/Edge). Exporte-le avec une extension "Get cookies.txt".
+TOUMAI_YTDLP_COOKIES_FILE=./cookies.txt
+# 2) OU extraction directe depuis le navigateur (échoue si Chrome est ouvert ou
+#    chiffré app-bound ; Firefox est le plus fiable). "chrome:Profile 1" possible.
+TOUMAI_YTDLP_COOKIES_FROM_BROWSER=firefox
+```
+
+Les cookies restent **best-effort** : s'ils sont illisibles, le download réessaie
+sans plutôt que d'échouer. Un job dont l'extracteur casse part en `failed` (DLQ)
+**sans bloquer les autres**.

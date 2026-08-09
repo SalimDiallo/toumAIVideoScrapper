@@ -8,6 +8,8 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+__all__ = ["Settings", "reload_into"]
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="TOUMAI_", env_file=".env", extra="ignore")
@@ -68,6 +70,11 @@ class Settings(BaseSettings):
     metadata_backend: Literal["none", "postgres"] = "none"
     postgres_dsn: str = "postgresql+psycopg://toumai:toumai@localhost:5432/toumai"
 
+    # --- Veille (surveillance quotidienne des chaînes) ---
+    # Nombre de vidéos récentes scannées par chaîne à chaque passage. On dédup
+    # ce lot contre les vidéos déjà ingérées ; toute nouveauté est mise en file.
+    veille_recent_limit: int = 15
+
     # Kafka (API <-> workers decoupling)
     kafka_bootstrap_servers: str = "localhost:9092"
     # Version d'API fixe pour éviter le probing de kafka-python-ng qui plante sous
@@ -82,3 +89,17 @@ class Settings(BaseSettings):
     topic_job_requested: str = "job.requested"
     topic_job_completed: str = "job.completed"
     topic_job_dlq: str = "job.dlq"
+
+
+def reload_into(target: Settings, env_file: str | Path | None = None) -> Settings:
+    """Re-read config from `.env` (+ OS env) and copy it onto an existing Settings.
+
+    Mutating the shared instance in place — rather than returning a new object —
+    means every closure/adapter that already holds a reference to `target`
+    immediately sees the new values, so the app applies config changes without a
+    process restart. Returns `target` for convenience.
+    """
+    fresh = Settings(_env_file=str(env_file)) if env_file else Settings()
+    for name in Settings.model_fields:
+        setattr(target, name, getattr(fresh, name))
+    return target

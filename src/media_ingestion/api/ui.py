@@ -27,16 +27,21 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
 
-from ..config import Settings
-from ..domain.models import Job, JobStatus
+from ..channel import channel_key as extract_channel_key, normalize_channel_url
+from ..env_file import update_env
+from ..transcript_quality import assess as assess_quality
+from ..config import Settings, reload_into
+from ..domain.models import Job, JobStatus, WatchedChannel
 from ..playlist import extract_playlist_id
 from ..video_id import extract_video_id
 from ..domain.ports import (
+    ChannelWatchStorePort,
     EventPublisherPort,
     JobStorePort,
     MetadataRepositoryPort,
     PlaylistResolverPort,
     StoragePort,
+    VeilleRunLogPort,
 )
 
 _BASE = Path(__file__).parent
@@ -66,6 +71,9 @@ STATUS_META: dict[str, dict[str, str]] = {
 }
 STATUS_ORDER = ["pending", "running", "completed", "failed"]
 
+# Rows per page for the paginated tables (videos, jobs).
+_PAGE_SIZE = 50
+
 
 def _parse_languages(raw: str | None, default: list[str]) -> list[str]:
     """Split a free-form 'fr, en; ar' string into a clean language list."""
@@ -79,6 +87,25 @@ def _fmt_dt(value: datetime | None) -> str:
     if value is None:
         return "—"
     return value.astimezone(timezone.utc).strftime("%d/%m %H:%M")
+
+
+def _fmt_relative(value: datetime | None) -> str:
+    """Human 'time ago' label (French), for the veille monitoring log."""
+    if value is None:
+        return "jamais"
+    secs = int((datetime.now(timezone.utc) - value.astimezone(timezone.utc)).total_seconds())
+    if secs < 0:
+        return "à l'instant"
+    if secs < 60:
+        return "à l'instant"
+    mins = secs // 60
+    if mins < 60:
+        return f"il y a {mins} min"
+    hours = mins // 60
+    if hours < 24:
+        return f"il y a {hours} h"
+    days = hours // 24
+    return f"il y a {days} j"
 
 
 def _job_vm(job: Job) -> dict:
@@ -129,6 +156,36 @@ def _fmt_ts(seconds: float) -> str:
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
+def _fmt_duration(seconds: float | int | None) -> str:
+    """Readable audio length: '2 h 05', '43 min', or '18 s'."""
+    secs = int(seconds or 0)
+    h, rem = divmod(secs, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h} h {m:02d}"
+    if m:
+        return f"{m} min"
+    return f"{s} s"
+
+
+# Human label + Tailwind classes per estimated transcription-quality level.
+QUALITY_META: dict[str, dict[str, str]] = {
+    "Excellente": {"badge": "bg-emerald-50 text-emerald-700 ring-emerald-600/20", "bar": "bg-emerald-500"},
+    "Bonne": {"badge": "bg-teal-50 text-teal-700 ring-teal-600/20", "bar": "bg-teal-500"},
+    "Moyenne": {"badge": "bg-amber-50 text-amber-700 ring-amber-600/20", "bar": "bg-amber-500"},
+    "Faible": {"badge": "bg-rose-50 text-rose-700 ring-rose-600/20", "bar": "bg-rose-500"},
+    "Indisponible": {"badge": "bg-slate-100 text-slate-500 ring-slate-500/20", "bar": "bg-slate-300"},
+}
+
+# Human label per source provenance bucket.
+SOURCE_KIND_LABEL = {
+    "human": "Sous-titres auteur (humain)",
+    "asr": "Reconnaissance vocale (ASR)",
+    "translated": "Traduction automatique",
+    "none": "Aucune source",
+}
+
+
 def _segments_vm(transcript: dict | None) -> list[dict]:
     """Turn transcript segments into rows aligned to their audio time range."""
     if not transcript:
@@ -141,6 +198,63 @@ def _segments_vm(transcript: dict | None) -> list[dict]:
             continue
         out.append({"start_s": round(start, 2), "ts": _fmt_ts(start), "text": text})
     return out
+
+
+def _quality_vm(q: dict, duration_s) -> dict:
+    """Pre-format the assessed quality metrics for the media template."""
+    meta = QUALITY_META.get(q["label"], QUALITY_META["Indisponible"])
+    cov = q["coverage"]
+    return {
+        "available": q["available"],
+        "label": q["label"],
+        "badge": meta["badge"],
+        "bar": meta["bar"],
+        "score": q["score"],
+        "coverage_pct": round(cov * 100) if cov is not None else None,
+        "source_kind": q["source_kind"],
+        "source_label": SOURCE_KIND_LABEL.get(q["source_kind"], "—"),
+        "n_segments": q["n_segments"],
+        "words": q["words"],
+        "wpm": q["wpm"],
+        "start_offset": _fmt_duration(q["start_offset_s"]) if q["start_offset_s"] else "0 s",
+        "max_gap": _fmt_duration(q["max_gap_s"]) if q["max_gap_s"] else "0 s",
+        "duration": _fmt_duration(duration_s) if duration_s else "—",
+    }
+
+
+def _stats_vm(s: dict) -> dict:
+    """Pre-format catalog aggregates for the analytics page."""
+    videos = s.get("videos", 0)
+    total_dur = s.get("duration_s", 0)
+    avail = s.get("with_transcript", 0)
+
+    def _rows(items: list[dict], key: str) -> list[dict]:
+        out = []
+        for r in items:
+            d = r.get("duration_s", 0)
+            out.append(
+                {
+                    "name": r.get(key) or "?",
+                    "videos": r.get("videos", 0),
+                    "duration": _fmt_duration(d),
+                    "hours": round(d / 3600, 1),
+                    "pct": round(100 * d / total_dur) if total_dur else 0,
+                }
+            )
+        return out
+
+    return {
+        "videos": videos,
+        "duration": _fmt_duration(total_dur),
+        "hours": round(total_dur / 3600, 1),
+        "avg_duration": _fmt_duration(total_dur / videos) if videos else "—",
+        "with_transcript": avail,
+        "without_transcript": s.get("without_transcript", 0),
+        "transcript_pct": round(100 * avail / videos) if videos else 0,
+        "by_language": _rows(s.get("by_language", []), "language"),
+        "by_provider": _rows(s.get("by_provider", []), "provider"),
+        "by_source": s.get("by_source", []),
+    }
 
 
 def _audio_response(handle) -> FileResponse | RedirectResponse:
@@ -160,6 +274,9 @@ def mount_ui(
     get_storage: Callable[[], StoragePort],
     get_catalog: Callable[[], MetadataRepositoryPort],
     get_playlist_resolver: Callable[[], PlaylistResolverPort],
+    get_channel_store: Callable[[], ChannelWatchStorePort],
+    get_veille_run_log: Callable[[], VeilleRunLogPort],
+    run_veille: Callable[[], dict],
 ) -> None:
     """Attach static files + the /ui router to an existing FastAPI app."""
     app.mount("/static", StaticFiles(directory=str(_BASE / "static")), name="static")
@@ -181,19 +298,114 @@ def mount_ui(
     def dashboard(request: Request) -> HTMLResponse:
         chart = _fill_timeseries(store.timeseries(days=14), days=14)
         recent = [_job_vm(j) for j in store.list(limit=8)]
+        audio = _stats_vm(get_catalog().stats())
         return templates.TemplateResponse(
             request,
             "dashboard.html",
-            {"active": "dashboard", "kpis": _kpis(), "chart": chart, "recent": recent},
+            {
+                "active": "dashboard",
+                "kpis": _kpis(),
+                "chart": chart,
+                "recent": recent,
+                "audio": audio,
+            },
         )
 
     @router.get("/jobs", response_class=HTMLResponse)
-    def jobs_page(request: Request, status: str | None = None) -> HTMLResponse:
+    def jobs_page(request: Request, status: str | None = None, q: str | None = None) -> HTMLResponse:
         active_status = status if status in STATUS_META else None
         return templates.TemplateResponse(
             request,
             "jobs.html",
-            {"active": "jobs", "status": active_status, "kpis": _kpis()},
+            {"active": "jobs", "status": active_status, "q": (q or "").strip() or None, "kpis": _kpis()},
+        )
+
+    @router.get("/stats", response_class=HTMLResponse)
+    def stats_page(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "stats.html",
+            {"active": "stats", "stats": _stats_vm(get_catalog().stats())},
+        )
+
+    def _env_path() -> Path:
+        return Path(os.environ.get("TOUMAI_ENV_FILE", ".env"))
+
+    @router.get("/settings", response_class=HTMLResponse)
+    def settings_page(request: Request) -> HTMLResponse:
+        cfg = {
+            "languages": ", ".join(settings.languages),
+            "proxies": "\n".join(settings.download_proxies),
+            "webshare_username": settings.webshare_proxy_username or "",
+            "webshare_password": settings.webshare_proxy_password or "",
+            "cookies_from_browser": settings.ytdlp_cookies_from_browser or "",
+            "veille_recent_limit": settings.veille_recent_limit,
+            "accept_youtube_asr": settings.accept_youtube_asr,
+            "enable_transcript_translation": settings.enable_transcript_translation,
+            "max_concurrent_downloads": settings.max_concurrent_downloads,
+            "download_delay_min_s": settings.download_delay_min_s,
+            "download_delay_max_s": settings.download_delay_max_s,
+            # read-only infra (informational)
+            "env_path": str(_env_path()),
+            "postgres_dsn": settings.postgres_dsn,
+            "kafka": settings.kafka_bootstrap_servers,
+            "storage_backend": settings.storage_backend,
+        }
+        return templates.TemplateResponse(
+            request, "config.html", {"active": "settings", "cfg": cfg}
+        )
+
+    @router.post("/settings", response_class=HTMLResponse)
+    def settings_save(
+        request: Request,
+        languages: str = Form(default=""),
+        proxies: str = Form(default=""),
+        webshare_username: str = Form(default=""),
+        webshare_password: str = Form(default=""),
+        cookies_from_browser: str = Form(default=""),
+        veille_recent_limit: int = Form(default=15),
+        max_concurrent_downloads: int = Form(default=3),
+        download_delay_min_s: float = Form(default=1.0),
+        download_delay_max_s: float = Form(default=4.0),
+        accept_youtube_asr: bool = Form(default=False),
+        enable_transcript_translation: bool = Form(default=False),
+    ) -> HTMLResponse:
+        proxy_list = [p.strip() for p in proxies.replace(",", "\n").splitlines() if p.strip()]
+        lang_list = _parse_languages(languages, settings.languages)
+        updates: dict[str, str | None] = {
+            "TOUMAI_LANGUAGES": json.dumps(lang_list),
+            "TOUMAI_DOWNLOAD_PROXIES": json.dumps(proxy_list) if proxy_list else None,
+            "TOUMAI_WEBSHARE_PROXY_USERNAME": webshare_username.strip() or None,
+            "TOUMAI_WEBSHARE_PROXY_PASSWORD": webshare_password.strip() or None,
+            "TOUMAI_YTDLP_COOKIES_FROM_BROWSER": cookies_from_browser.strip() or None,
+            "TOUMAI_VEILLE_RECENT_LIMIT": str(int(veille_recent_limit)),
+            "TOUMAI_MAX_CONCURRENT_DOWNLOADS": str(int(max_concurrent_downloads)),
+            "TOUMAI_DOWNLOAD_DELAY_MIN_S": str(float(download_delay_min_s)),
+            "TOUMAI_DOWNLOAD_DELAY_MAX_S": str(float(download_delay_max_s)),
+            "TOUMAI_ACCEPT_YOUTUBE_ASR": "true" if accept_youtube_asr else "false",
+            "TOUMAI_ENABLE_TRANSCRIPT_TRANSLATION": "true" if enable_transcript_translation else "false",
+        }
+        update_env(_env_path(), updates)
+        # Apply live: re-read .env into the shared Settings instance so every
+        # request (UI + API) uses the new values immediately — a refresh is enough.
+        reload_into(settings, _env_path())
+        return templates.TemplateResponse(
+            request,
+            "partials/flash.html",
+            {
+                "ok": True,
+                "message": "Configuration enregistrée et appliquée. Le worker se mettra à jour au prochain job.",
+            },
+        )
+
+    @router.post("/settings/reload", response_class=HTMLResponse)
+    def settings_reload(request: Request) -> HTMLResponse:
+        """Re-read .env into the live Settings (e.g. after editing the file by hand)."""
+        reload_into(settings, _env_path())
+        return templates.TemplateResponse(
+            request,
+            "partials/flash.html",
+            {"ok": True, "message": "Configuration rechargée depuis .env."},
         )
 
     @router.get("/upload", response_class=HTMLResponse)
@@ -206,17 +418,33 @@ def mount_ui(
 
     @router.get("/videos", response_class=HTMLResponse)
     def videos_page(
-        request: Request, language: str | None = None, transcript: str | None = None
+        request: Request,
+        language: str | None = None,
+        transcript: str | None = None,
+        provider: str | None = None,
+        q: str | None = None,
+        page: int = 1,
     ) -> HTMLResponse:
         transcript = transcript if transcript in ("available", "unavailable") else None
+        q = (q or "").strip() or None
+        page = max(page, 1)
+        offset = (page - 1) * _PAGE_SIZE
+        # Fetch one extra row to know whether a next page exists (no COUNT needed).
         rows = get_catalog().list(
-            language=language or None, transcript=transcript, limit=200
+            language=language or None,
+            transcript=transcript,
+            provider=provider or None,
+            q=q,
+            limit=_PAGE_SIZE + 1,
+            offset=offset,
         )
-        # Language chips are built from a transcript-unfiltered scan so they stay
-        # stable whatever the transcript filter is.
-        langs = sorted(
-            {r.get("language") for r in get_catalog().list(limit=10000) if r.get("language")}
-        )
+        has_next = len(rows) > _PAGE_SIZE
+        rows = rows[:_PAGE_SIZE]
+        # Chips come from the cheap aggregate (one grouped query) instead of a full
+        # table scan — stable regardless of the active filters.
+        st = get_catalog().stats()
+        langs = sorted(r["language"] for r in st["by_language"] if r["language"] not in (None, "?"))
+        providers = sorted(r["provider"] for r in st["by_provider"] if r["provider"] not in (None, "?"))
         return templates.TemplateResponse(
             request,
             "videos.html",
@@ -224,8 +452,14 @@ def mount_ui(
                 "active": "videos",
                 "videos": rows,
                 "languages": langs,
+                "providers": providers,
                 "language": language,
                 "transcript": transcript,
+                "provider": provider,
+                "q": q,
+                "page": page,
+                "has_next": has_next,
+                "has_prev": page > 1,
             },
         )
 
@@ -246,6 +480,17 @@ def mount_ui(
         # MinIO -> play straight from the presigned URL (seekable); local -> our
         # own /audio route (FileResponse, also seekable).
         audio_src = handle.url if (handle and handle.url) else (audio_url if handle else None)
+        # Transcription quality (coverage / desync / provenance) — estimated.
+        metadata = get_storage().load_metadata(storage_uri) if storage_uri else None
+        duration_s = (metadata or {}).get("duration_s")
+        quality = _quality_vm(
+            assess_quality(
+                (transcript or {}).get("segments"),
+                duration_s,
+                (transcript or {}).get("source"),
+            ),
+            duration_s,
+        )
         return templates.TemplateResponse(
             request,
             "media.html",
@@ -257,6 +502,7 @@ def mount_ui(
                 "audio_url": audio_src,
                 "segments": segments,
                 "plain_text": (transcript or {}).get("text") if not segments else None,
+                "quality": quality,
                 "message": message,
             },
         )
@@ -309,7 +555,7 @@ def mount_ui(
             url=video.get("url") or "",
             storage_uri=video.get("storage_uri"),
             audio_url=f"/ui/videos/{video_id}/audio",
-            badges=[video.get("language"), video.get("channel")],
+            badges=[video.get("provider"), video.get("language"), video.get("channel")],
             message=None,
         )
 
@@ -395,12 +641,20 @@ def mount_ui(
         video_ids: list[str] = Form(default=[]),
         language: str | None = None,
         transcript: str | None = None,
+        provider: str | None = None,
+        q: str | None = None,
     ) -> HTMLResponse:
         transcript = transcript if transcript in ("available", "unavailable") else None
         for vid in video_ids:
             if vid:
                 _delete_video(vid)
-        rows = get_catalog().list(language=language or None, transcript=transcript, limit=200)
+        rows = get_catalog().list(
+            language=language or None,
+            transcript=transcript,
+            provider=provider or None,
+            q=(q or "").strip() or None,
+            limit=_PAGE_SIZE,
+        )
         return templates.TemplateResponse(request, "partials/videos_rows.html", {"videos": rows})
 
     # --------------------------------------------------------------- fragments
@@ -408,25 +662,31 @@ def mount_ui(
     def partial_kpis(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(request, "partials/kpis.html", {"kpis": _kpis()})
 
-    def _jobs_rows(request: Request, status: str | None, selectable: bool) -> HTMLResponse:
+    def _jobs_rows(
+        request: Request, status: str | None, selectable: bool, q: str | None = None
+    ) -> HTMLResponse:
         status_enum = JobStatus(status) if status in STATUS_META else None
-        jobs = [_job_vm(j) for j in store.list(status=status_enum, limit=100)]
+        jobs = [_job_vm(j) for j in store.list(status=status_enum, q=q or None, limit=100)]
         return templates.TemplateResponse(
             request,
             "partials/jobs_rows.html",
-            {"jobs": jobs, "status": status, "selectable": selectable},
+            {"jobs": jobs, "status": status, "selectable": selectable, "q": q},
         )
 
     @router.get("/partials/jobs-rows", response_class=HTMLResponse)
     def partial_jobs_rows(
-        request: Request, status: str | None = None, limit: int = 100, selectable: bool = False
+        request: Request,
+        status: str | None = None,
+        q: str | None = None,
+        limit: int = 100,
+        selectable: bool = False,
     ) -> HTMLResponse:
         status_enum = JobStatus(status) if status in STATUS_META else None
-        jobs = [_job_vm(j) for j in store.list(status=status_enum, limit=limit)]
+        jobs = [_job_vm(j) for j in store.list(status=status_enum, q=(q or "").strip() or None, limit=limit)]
         return templates.TemplateResponse(
             request,
             "partials/jobs_rows.html",
-            {"jobs": jobs, "status": status, "selectable": selectable},
+            {"jobs": jobs, "status": status, "selectable": selectable, "q": q},
         )
 
     @router.get("/api/timeseries")
@@ -440,6 +700,7 @@ def mount_ui(
         job_id: str,
         status: str | None = Form(default=None),
         selectable: bool = Form(default=False),
+        q: str | None = Form(default=None),
     ) -> HTMLResponse:
         job = store.get(job_id)
         if job is not None:
@@ -449,7 +710,7 @@ def mount_ui(
                 key=job_id,
                 event={"job_id": job_id, "url": job.url, "languages": job.languages},
             )
-        return _jobs_rows(request, status, selectable)
+        return _jobs_rows(request, status, selectable, q)
 
     @router.post("/jobs/{job_id}/delete", response_class=HTMLResponse)
     def delete_job(
@@ -457,9 +718,10 @@ def mount_ui(
         job_id: str,
         status: str | None = Form(default=None),
         selectable: bool = Form(default=False),
+        q: str | None = Form(default=None),
     ) -> HTMLResponse:
         store.delete(job_id)
-        return _jobs_rows(request, status, selectable)
+        return _jobs_rows(request, status, selectable, q)
 
     @router.post("/jobs/bulk-delete", response_class=HTMLResponse)
     def bulk_delete_jobs(
@@ -467,11 +729,12 @@ def mount_ui(
         job_ids: list[str] = Form(default=[]),
         status: str | None = None,
         selectable: bool = True,
+        q: str | None = None,
     ) -> HTMLResponse:
         for jid in job_ids:
             if jid:
                 store.delete(jid)
-        return _jobs_rows(request, status, selectable)
+        return _jobs_rows(request, status, selectable, q)
 
     @router.post("/process", response_class=HTMLResponse)
     def submit_url(
@@ -596,6 +859,193 @@ def mount_ui(
                 "filename": file.filename,
             },
         )
+
+    # ------------------------------------------------------------------ veille
+    def _channel_vm(channel: WatchedChannel) -> dict:
+        return {
+            "channel_key": channel.channel_key,
+            "url": channel.url,
+            "name": channel.name or channel.channel_key,
+            "active": channel.active,
+            "added_at": _fmt_dt(channel.added_at),
+            "last_checked_at": _fmt_dt(channel.last_checked_at),
+            "last_checked_ago": _fmt_relative(channel.last_checked_at),
+            "never_checked": channel.last_checked_at is None,
+        }
+
+    def _run_vm(run) -> dict:
+        hits = [d for d in (run.detail or []) if d.get("new")]
+        return {
+            "ran_at": _fmt_dt(run.ran_at),
+            "ago": _fmt_relative(run.ran_at),
+            "checked": run.checked,
+            "queued": run.queued,
+            # per-channel breakdown: only channels that produced something
+            "hits": hits,
+            "empty": run.checked == 0,
+        }
+
+    def _veille_kpis() -> dict:
+        channels = get_channel_store().list_all()
+        active = sum(1 for c in channels if c.active)
+        stats = get_veille_run_log().stats()
+        recent = get_veille_run_log().list_recent(limit=1)
+        last = recent[0] if recent else None
+        return {
+            "channels_total": len(channels),
+            "channels_active": active,
+            "channels_inactive": len(channels) - active,
+            "runs": stats.get("runs", 0),
+            "queued_total": stats.get("queued_total", 0),
+            "last_ago": _fmt_relative(stats.get("last_ran_at")),
+            "last_at": _fmt_dt(stats.get("last_ran_at")),
+            "last_queued": last.queued if last else 0,
+            "last_checked": last.checked if last else 0,
+        }
+
+    def _channels_rows(request: Request) -> HTMLResponse:
+        channels = [_channel_vm(c) for c in get_channel_store().list_all()]
+        return templates.TemplateResponse(
+            request, "partials/channels_rows.html", {"channels": channels}
+        )
+
+    def _runs_rows(request: Request) -> HTMLResponse:
+        runs = [_run_vm(r) for r in get_veille_run_log().list_recent(limit=20)]
+        return templates.TemplateResponse(
+            request, "partials/veille_runs.html", {"runs": runs}
+        )
+
+    @router.get("/veille", response_class=HTMLResponse)
+    def veille_page(request: Request) -> HTMLResponse:
+        channels = [_channel_vm(c) for c in get_channel_store().list_all()]
+        runs = [_run_vm(r) for r in get_veille_run_log().list_recent(limit=20)]
+        return templates.TemplateResponse(
+            request,
+            "veille.html",
+            {"active": "veille", "channels": channels, "runs": runs, "kpis": _veille_kpis()},
+        )
+
+    @router.get("/veille/partials/rows", response_class=HTMLResponse)
+    def veille_rows(request: Request) -> HTMLResponse:
+        return _channels_rows(request)
+
+    @router.get("/veille/partials/runs", response_class=HTMLResponse)
+    def veille_runs_rows(request: Request) -> HTMLResponse:
+        return _runs_rows(request)
+
+    @router.get("/veille/partials/kpis", response_class=HTMLResponse)
+    def veille_kpis_partial(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request, "partials/veille_kpis.html", {"kpis": _veille_kpis()}
+        )
+
+    @router.post("/veille/add", response_class=HTMLResponse)
+    def veille_add(
+        request: Request, channel: str = Form(...), name: str = Form(default="")
+    ) -> HTMLResponse:
+        raw = channel.strip()
+        key = extract_channel_key(raw)
+        url = normalize_channel_url(raw)
+        if not key or not url:
+            return templates.TemplateResponse(
+                request,
+                "partials/flash.html",
+                {"ok": False, "message": "Chaîne non reconnue (handle @nom, URL ou id UC…)."},
+            )
+        get_channel_store().add(
+            WatchedChannel(channel_key=key, url=url, name=(name.strip() or None))
+        )
+        resp = templates.TemplateResponse(
+            request,
+            "partials/flash.html",
+            {"ok": True, "message": f"Chaîne ajoutée : {name.strip() or key}"},
+        )
+        resp.headers["HX-Trigger"] = "channelsChanged"
+        return resp
+
+    @router.post("/veille/import-csv", response_class=HTMLResponse)
+    async def veille_import_csv(request: Request, file: UploadFile = File(...)) -> HTMLResponse:
+        """Bulk-add watched channels from a CSV (column `channel`, optional `name`)."""
+        raw = (await file.read()).decode("utf-8-sig")
+        reader = csv.DictReader(io.StringIO(raw))
+        fields = [f.strip().lower() for f in (reader.fieldnames or [])]
+        # Accept `channel`, or fall back to `url` / `handle` as the channel column.
+        col = next((c for c in ("channel", "url", "handle") if c in fields), None)
+        if col is None:
+            resp = templates.TemplateResponse(
+                request,
+                "partials/flash.html",
+                {"ok": False, "message": "Le CSV doit contenir une colonne 'channel' (ou 'url')."},
+            )
+            return resp
+
+        store = get_channel_store()
+        existing = {c.channel_key for c in store.list_all()}
+        seen: set[str] = set()
+        added = duplicates = invalid = 0
+        for row in reader:
+            norm = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+            raw_channel = norm.get(col, "")
+            if not raw_channel:
+                continue
+            key = extract_channel_key(raw_channel)
+            url = normalize_channel_url(raw_channel)
+            if not key or not url:
+                invalid += 1
+                continue
+            if key in existing or key in seen:
+                duplicates += 1
+                continue
+            store.add(WatchedChannel(channel_key=key, url=url, name=(norm.get("name") or None)))
+            seen.add(key)
+            added += 1
+
+        parts = [f"{added} chaîne(s) ajoutée(s)"]
+        if duplicates:
+            parts.append(f"{duplicates} doublon(s) ignoré(s)")
+        if invalid:
+            parts.append(f"{invalid} ligne(s) invalide(s)")
+        resp = templates.TemplateResponse(
+            request,
+            "partials/flash.html",
+            {"ok": added > 0, "warn": added == 0, "message": " · ".join(parts)},
+        )
+        if added:
+            resp.headers["HX-Trigger"] = "channelsChanged"
+        return resp
+
+    @router.post("/veille/toggle", response_class=HTMLResponse)
+    def veille_toggle(
+        request: Request, channel_key: str = Form(...), active: bool = Form(...)
+    ) -> HTMLResponse:
+        get_channel_store().set_active(channel_key, active)
+        resp = _channels_rows(request)
+        resp.headers["HX-Trigger"] = "channelsChanged"  # refresh the KPI cards
+        return resp
+
+    @router.post("/veille/delete", response_class=HTMLResponse)
+    def veille_delete(request: Request, channel_key: str = Form(...)) -> HTMLResponse:
+        get_channel_store().remove(channel_key)
+        resp = _channels_rows(request)
+        resp.headers["HX-Trigger"] = "channelsChanged"
+        return resp
+
+    @router.post("/veille/run", response_class=HTMLResponse)
+    def veille_run(request: Request) -> HTMLResponse:
+        summary = run_veille()
+        resp = templates.TemplateResponse(
+            request,
+            "partials/flash.html",
+            {
+                "ok": True,
+                "message": (
+                    f"Veille lancée : {summary['checked']} chaîne(s) vérifiée(s), "
+                    f"{summary['queued']} job(s) créé(s)."
+                ),
+            },
+        )
+        resp.headers["HX-Trigger"] = "channelsChanged"
+        return resp
 
     app.include_router(router)
 

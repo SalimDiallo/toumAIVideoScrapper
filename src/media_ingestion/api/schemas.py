@@ -56,6 +56,7 @@ class VideoItem(BaseModel):
     duration_s: int | None = None
     upload_date: str | None = None
     language: str | None = None
+    provider: str | None = None
     transcript_status: str | None = None
     transcript_source: str | None = None
     storage_uri: str | None = None

@@ -38,3 +38,28 @@ def build_catalog(settings: Settings):
     repo = PostgresMetadataRepository(settings.postgres_dsn)
     repo.create_schema()
     return repo
+
+
+def build_channel_store(settings: Settings):
+    """Postgres registry of the channels under daily surveillance (the veille)."""
+    from .adapters.postgres_channels import PostgresChannelWatchStore
+
+    store = PostgresChannelWatchStore(settings.postgres_dsn)
+    store.create_schema()
+    return store
+
+
+def build_channel_resolver(settings: Settings):
+    """yt-dlp channel enumerator (lists a channel's most recent uploads, flat)."""
+    from .adapters.channel_resolver import YtDlpChannelResolver
+
+    return YtDlpChannelResolver()
+
+
+def build_veille_run_log(settings: Settings):
+    """Postgres append-only history of veille passes (the monitoring log)."""
+    from .adapters.postgres_veille_runs import PostgresVeilleRunLog
+
+    log = PostgresVeilleRunLog(settings.postgres_dsn)
+    log.create_schema()
+    return log

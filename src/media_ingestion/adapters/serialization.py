@@ -32,6 +32,7 @@ def metadata_dict(result: IngestionResult, language: str, audio_location: str) -
         "duration_s": m.duration_s,
         "upload_date": m.upload_date,
         "language": language,
+        "provider": m.provider,
         "audio_path": audio_location,
         "audio_format": result.audio.format,
         "transcript_status": result.transcript_status.value,

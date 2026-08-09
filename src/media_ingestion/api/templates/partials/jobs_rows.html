@@ -25,6 +25,7 @@
     {% if j.can_retry %}
     <form hx-post="/ui/jobs/{{ j.id }}/retry" hx-target="#jobs-tbody" hx-swap="innerHTML" class="inline">
       <input type="hidden" name="status" value="{{ status or '' }}">
+      <input type="hidden" name="q" value="{{ q or '' }}">
       {% if selectable %}<input type="hidden" name="selectable" value="1">{% endif %}
       <button class="rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100">↻ Retry</button>
     </form>
@@ -35,6 +36,7 @@
     <form hx-post="/ui/jobs/{{ j.id }}/delete" hx-target="#jobs-tbody" hx-swap="innerHTML"
           hx-confirm="Supprimer ce job ?" class="inline">
       <input type="hidden" name="status" value="{{ status or '' }}">
+      <input type="hidden" name="q" value="{{ q or '' }}">
       {% if selectable %}<input type="hidden" name="selectable" value="1">{% endif %}
       <button type="submit" class="ml-1 rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50">🗑</button>
     </form>

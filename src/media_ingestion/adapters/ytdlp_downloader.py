@@ -14,6 +14,7 @@ import structlog
 import yt_dlp
 
 from ..domain.models import AudioAsset, VideoMetadata
+from ..provider import provider_from_extractor
 from .download_errors import RateLimitedError
 
 log = structlog.get_logger(__name__)
@@ -70,6 +71,9 @@ class YtDlpDownloader:
             if self._ffmpeg_location is not None:
                 opts["ffmpeg_location"] = str(self._ffmpeg_location)
 
+        # `converted` suit ce qu'on a réellement obtenu : passe à False si la
+        # conversion wav échoue et qu'on retombe sur l'audio natif (voir plus bas).
+        converted = has_ffmpeg
         try:
             info = self._extract(opts, video_url)
         except yt_dlp.utils.DownloadError as exc:
@@ -84,18 +88,30 @@ class YtDlpDownloader:
                 log.warning("ytdlp.cookies.unavailable", url=video_url, error=str(exc))
                 opts.pop("cookiefile", None)
                 opts.pop("cookiesfrombrowser", None)
-                info = self._extract(opts, video_url)
+                try:
+                    info = self._extract(opts, video_url)
+                except yt_dlp.utils.DownloadError as exc2:
+                    if has_ffmpeg and _is_conversion_error(exc2):
+                        info, converted = self._retry_native(opts, video_url, exc2), False
+                    else:
+                        raise
+            # La conversion wav de ffmpeg casse sur certains conteneurs/codecs
+            # (flux Odysee/LBRY notamment) : on garde l'audio natif plutôt que de
+            # perdre le job — l'audio est téléchargé, seul le ré-encodage a échoué.
+            elif has_ffmpeg and _is_conversion_error(exc):
+                info, converted = self._retry_native(opts, video_url, exc), False
             else:
                 raise
 
         video_id = info["id"]
-        if has_ffmpeg:
+        if converted:
             audio_path = dest_dir / f"{video_id}.{self._audio_format}"
             audio_format = self._audio_format
         else:
             audio_path = self._downloaded_path(info, dest_dir, video_id)
             audio_format = audio_path.suffix.lstrip(".")
 
+        provider = provider_from_extractor(info.get("extractor_key") or info.get("extractor"))
         metadata = VideoMetadata(
             video_id=video_id,
             url=info.get("webpage_url", video_url),
@@ -104,6 +120,7 @@ class YtDlpDownloader:
             duration_s=info.get("duration"),
             upload_date=info.get("upload_date"),
             language=info.get("language"),
+            provider=provider.value,
         )
         audio = AudioAsset(path=audio_path, format=audio_format)
         return metadata, audio
@@ -112,6 +129,18 @@ class YtDlpDownloader:
     def _extract(opts: dict, video_url: str) -> dict:
         with yt_dlp.YoutubeDL(opts) as ydl:
             return ydl.extract_info(video_url, download=True)
+
+    @staticmethod
+    def _retry_native(opts: dict, video_url: str, exc: Exception) -> dict:
+        """Ré-extrait en gardant l'audio source (drop le post-processeur wav).
+
+        yt-dlp réutilise le fichier déjà téléchargé, seule l'étape de conversion
+        est abandonnée — on récupère donc l'audio natif (m4a/webm...) sans re-DL.
+        """
+        log.warning("ytdlp.audio_conversion.failed", url=video_url, error=str(exc))
+        opts.pop("postprocessors", None)
+        opts.pop("ffmpeg_location", None)
+        return YtDlpDownloader._extract(opts, video_url)
 
     @staticmethod
     def _downloaded_path(info: dict, dest_dir: Path, video_id: str) -> Path:
@@ -125,6 +154,12 @@ class YtDlpDownloader:
 def _is_rate_limited(exc: Exception) -> bool:
     msg = str(exc).lower()
     return "429" in msg or "too many requests" in msg
+
+
+def _is_conversion_error(exc: Exception) -> bool:
+    """Échec du ré-encodage audio par ffmpeg (post-processing), pas du download."""
+    msg = str(exc).lower()
+    return "conversion failed" in msg or "audio conversion failed" in msg
 
 
 def _uses_cookies(opts: dict) -> bool:

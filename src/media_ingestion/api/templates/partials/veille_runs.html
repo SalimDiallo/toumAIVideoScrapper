@@ -1,0 +1,34 @@
+{% for run in runs %}
+<tr class="border-b border-slate-100 hover:bg-slate-50/70 align-top">
+  <td class="px-4 py-3 whitespace-nowrap">
+    <div class="font-medium text-slate-700">{{ run.ago }}</div>
+    <div class="text-xs text-slate-400">{{ run.ran_at }}</div>
+  </td>
+  <td class="px-4 py-3 text-slate-600">
+    {% if run.empty %}<span class="text-slate-400 text-xs">aucune chaîne</span>{% else %}{{ run.checked }}{% endif %}
+  </td>
+  <td class="px-4 py-3">
+    {% if run.queued %}
+    <span class="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">+{{ run.queued }}</span>
+    {% else %}
+    <span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">0</span>
+    {% endif %}
+  </td>
+  <td class="px-4 py-3 text-xs text-slate-500">
+    {% if run.hits %}
+      <div class="flex flex-wrap gap-1">
+      {% for h in run.hits %}
+        <span class="inline-flex items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 text-slate-600">
+          {{ h.name or h.channel_key }}
+          <span class="font-semibold text-emerald-600">+{{ h.new }}</span>
+        </span>
+      {% endfor %}
+      </div>
+    {% else %}
+      <span class="text-slate-400">Aucune nouveauté</span>
+    {% endif %}
+  </td>
+</tr>
+{% else %}
+<tr><td colspan="4" class="px-4 py-12 text-center text-sm text-slate-400">Aucun passage enregistré pour l'instant.</td></tr>
+{% endfor %}

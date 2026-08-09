@@ -1,7 +1,8 @@
-"""CLI entry point: `toumai-ingest <youtube_url> [--lang fr en] ...`
+"""CLI entry point: `toumai-ingest <video_url> [--lang fr en] ...`
 
-This wires the concrete adapters into the use case. In Phase 2 the same
-use case is driven by a Kafka worker instead of this CLI.
+Accepts any URL yt-dlp can read (YouTube, Vimeo, Dailymotion, TikTok, Rumble,
+Odysee, PeerTube, Reddit, ...). This wires the concrete adapters into the use
+case. In Phase 2 the same use case is driven by a Kafka worker instead of this CLI.
 """
 
 from __future__ import annotations
@@ -10,13 +11,15 @@ import argparse
 import sys
 from pathlib import Path
 
+from .adapters.composite_transcript import CompositeTranscriptProvider
 from .adapters.local_storage import LocalJsonStorage
 from .adapters.rate_limited_downloader import RateLimitedDownloader
+from .adapters.subtitle_transcript import YtDlpSubtitleProvider
 from .adapters.youtube_transcript import YouTubeTranscriptProvider
 from .adapters.ytdlp_downloader import YtDlpDownloader
 from .application.ingest_video import IngestVideoUseCase
 from .config import Settings
-from .domain.ports import MetadataRepositoryPort, StoragePort
+from .domain.ports import MetadataRepositoryPort, StoragePort, TranscriptProviderPort
 from .logging_setup import configure_logging
 
 
@@ -84,14 +87,25 @@ def _build_downloader(settings: Settings) -> RateLimitedDownloader:
     )
 
 
+def _build_transcript_provider(settings: Settings) -> TranscriptProviderPort:
+    """Route captions per platform: YouTube -> caption API, others -> yt-dlp subtitles."""
+    youtube = YouTubeTranscriptProvider(
+        accept_asr=settings.accept_youtube_asr,
+        enable_translation=settings.enable_transcript_translation,
+        proxy_config=_build_transcript_proxy_config(settings),
+    )
+    # One fixed proxy (no rotation) for the subtitle metadata request, if configured.
+    subtitle = YtDlpSubtitleProvider(
+        accept_asr=settings.accept_youtube_asr,
+        proxy=settings.download_proxies[0] if settings.download_proxies else None,
+    )
+    return CompositeTranscriptProvider(youtube=youtube, subtitle=subtitle)
+
+
 def build_use_case(settings: Settings) -> IngestVideoUseCase:
     return IngestVideoUseCase(
         downloader=_build_downloader(settings),
-        transcript_provider=YouTubeTranscriptProvider(
-            accept_asr=settings.accept_youtube_asr,
-            enable_translation=settings.enable_transcript_translation,
-            proxy_config=_build_transcript_proxy_config(settings),
-        ),
+        transcript_provider=_build_transcript_provider(settings),
         storage=_build_storage(settings),
         metadata_repo=_build_metadata_repo(settings),
     )
@@ -100,7 +114,10 @@ def build_use_case(settings: Settings) -> IngestVideoUseCase:
 def main(argv: list[str] | None = None) -> int:
     settings = Settings()
     parser = argparse.ArgumentParser(prog="toumai-ingest", description=__doc__)
-    parser.add_argument("url", help="YouTube video or playlist URL (or a bare playlist id)")
+    parser.add_argument(
+        "url",
+        help="Video URL (YouTube/Vimeo/TikTok/...), YouTube playlist URL, or a bare playlist id",
+    )
     parser.add_argument(
         "--lang", nargs="+", default=settings.languages, help="Preferred caption languages"
     )

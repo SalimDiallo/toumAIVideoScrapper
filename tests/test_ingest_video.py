@@ -26,7 +26,7 @@ class FakeTranscriptProvider:
     def __init__(self, transcript: Transcript | None):
         self._transcript = transcript
 
-    def fetch(self, video_id: str, languages: list[str]):
+    def fetch(self, metadata: VideoMetadata, languages: list[str]):
         return self._transcript
 
 

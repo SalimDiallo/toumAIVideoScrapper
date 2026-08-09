@@ -77,11 +77,18 @@ class PostgresJobStore:
         return self._to_job(row) if row is not None else None
 
     def list(
-        self, *, status: JobStatus | None = None, limit: int = 50, offset: int = 0
+        self,
+        *,
+        status: JobStatus | None = None,
+        q: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[Job]:
         stmt = select(jobs).order_by(jobs.c.created_at.desc()).limit(limit).offset(offset)
         if status is not None:
             stmt = stmt.where(jobs.c.status == status.value)
+        if q:
+            stmt = stmt.where(jobs.c.url.ilike(f"%{q}%"))
         with self._engine.connect() as conn:
             rows = conn.execute(stmt).mappings().all()
         return [self._to_job(r) for r in rows]

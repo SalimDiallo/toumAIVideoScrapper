@@ -2,21 +2,50 @@
 {% block heading %}Catalogue vidéos{% endblock %}
 {% block content %}
 
+{# Each chip keeps the *other* active filters so they compose. #}
+{% set kt = ('&transcript=' ~ transcript) if transcript else '' %}
+{% set kl = ('&language=' ~ language) if language else '' %}
+{% set kp = ('&provider=' ~ provider) if provider else '' %}
+{% set kq = ('&q=' ~ q) if q else '' %}
+
 <div class="flex flex-wrap items-center gap-2">
   <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Langue</span>
-  <a href="/ui/videos{% if transcript %}?transcript={{ transcript }}{% endif %}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if not language %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Toutes</a>
+  <a href="/ui/videos?_=1{{ kt }}{{ kp }}{{ kq }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if not language %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Toutes</a>
   {% for l in languages %}
-  <a href="/ui/videos?language={{ l }}{% if transcript %}&transcript={{ transcript }}{% endif %}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if language == l %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">{{ l }}</a>
+  <a href="/ui/videos?language={{ l }}{{ kt }}{{ kp }}{{ kq }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if language == l %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">{{ l }}</a>
   {% endfor %}
-  <span class="ml-auto text-sm text-slate-400">{{ videos|length }} vidéo(s)</span>
 </div>
 
 <div class="mt-2 flex flex-wrap items-center gap-2">
   <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Transcript</span>
-  <a href="/ui/videos{% if language %}?language={{ language }}{% endif %}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if not transcript %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Tous</a>
-  <a href="/ui/videos?transcript=available{% if language %}&language={{ language }}{% endif %}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if transcript == 'available' %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Disponible</a>
-  <a href="/ui/videos?transcript=unavailable{% if language %}&language={{ language }}{% endif %}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if transcript == 'unavailable' %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Indisponible</a>
+  <a href="/ui/videos?_=1{{ kl }}{{ kp }}{{ kq }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if not transcript %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Tous</a>
+  <a href="/ui/videos?transcript=available{{ kl }}{{ kp }}{{ kq }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if transcript == 'available' %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Disponible</a>
+  <a href="/ui/videos?transcript=unavailable{{ kl }}{{ kp }}{{ kq }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if transcript == 'unavailable' %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Indisponible</a>
 </div>
+
+{% if providers %}
+<div class="mt-2 flex flex-wrap items-center gap-2">
+  <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Plateforme</span>
+  <a href="/ui/videos?_=1{{ kl }}{{ kt }}{{ kq }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if not provider %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Toutes</a>
+  {% for p in providers %}
+  <a href="/ui/videos?provider={{ p }}{{ kl }}{{ kt }}{{ kq }}" class="rounded-lg px-3 py-1.5 text-sm font-medium capitalize {% if provider == p %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">{{ p }}</a>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# Recherche : soumet en direct (debounce) et remplace le bloc résultats. #}
+<form class="mt-3" hx-get="/ui/videos" hx-target="#videos-results" hx-select="#videos-results"
+      hx-swap="outerHTML" hx-trigger="submit, keyup changed delay:300ms from:input[name=q], search from:input[name=q]"
+      hx-push-url="true">
+  <input type="hidden" name="language" value="{{ language or '' }}">
+  <input type="hidden" name="transcript" value="{{ transcript or '' }}">
+  <input type="hidden" name="provider" value="{{ provider or '' }}">
+  <div class="relative max-w-md">
+    <span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">🔎</span>
+    <input name="q" value="{{ q or '' }}" type="search" placeholder="Rechercher un titre, une chaîne, une URL…"
+           class="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm focus:border-[#018B96] focus:outline-none focus:ring-1 focus:ring-[#018B96]">
+  </div>
+</form>
 
 <form id="zipform" method="post" action="/ui/videos/zip" class="mt-4 rounded-xl border border-slate-200 bg-white">
   <!-- Toolbar : compteur de sélection + actions ZIP / suppression -->
@@ -24,7 +53,7 @@
     <span id="selcount" class="text-sm text-slate-500">0 sélectionnée(s)</span>
     <div class="ml-auto flex items-center gap-2">
       <button id="delsel" type="button" disabled
-              hx-post="/ui/videos/bulk-delete?language={{ language or '' }}&transcript={{ transcript or '' }}"
+              hx-post="/ui/videos/bulk-delete?language={{ language or '' }}&transcript={{ transcript or '' }}&provider={{ provider or '' }}&q={{ q or '' }}"
               hx-include=".rowcb:checked" hx-target="#videos-tbody" hx-swap="innerHTML"
               hx-confirm="Supprimer les vidéos sélectionnées et leur audio ? Action irréversible."
               class="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 px-3 py-1.5 text-sm font-medium text-rose-600 enabled:hover:bg-rose-50 disabled:opacity-40">
@@ -41,21 +70,39 @@
     </div>
   </div>
 
-  <div class="overflow-x-auto">
-    <table class="w-full text-sm">
-      <thead class="text-left text-xs uppercase tracking-wide text-slate-400">
-        <tr class="border-b border-slate-100">
-          <th class="px-4 py-3"><input id="selectall" type="checkbox" class="h-4 w-4 rounded border-slate-300"></th>
-          <th class="px-4 py-3 font-medium">Titre</th><th class="px-4 py-3 font-medium">Chaîne</th>
-          <th class="px-4 py-3 font-medium">Langue</th><th class="px-4 py-3 font-medium">Transcript</th>
-          <th class="px-4 py-3 font-medium">Source</th><th class="px-4 py-3 font-medium">Durée</th>
-          <th class="px-4 py-3 text-right font-medium">Actions</th>
-        </tr>
-      </thead>
-      <tbody id="videos-tbody">
-        {% include "partials/videos_rows.html" %}
-      </tbody>
-    </table>
+  <div id="videos-results">
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="text-left text-xs uppercase tracking-wide text-slate-400">
+          <tr class="border-b border-slate-100">
+            <th class="px-4 py-3"><input id="selectall" type="checkbox" class="h-4 w-4 rounded border-slate-300"></th>
+            <th class="px-4 py-3 font-medium">Titre</th><th class="px-4 py-3 font-medium">Plateforme</th>
+            <th class="px-4 py-3 font-medium">Chaîne</th>
+            <th class="px-4 py-3 font-medium">Langue</th><th class="px-4 py-3 font-medium">Transcript</th>
+            <th class="px-4 py-3 font-medium">Source</th><th class="px-4 py-3 font-medium">Durée</th>
+            <th class="px-4 py-3 text-right font-medium">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="videos-tbody">
+          {% include "partials/videos_rows.html" %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-sm">
+      <span class="text-slate-400">Page {{ page }}{% if q %} · recherche « {{ q }} »{% endif %}</span>
+      <div class="flex items-center gap-2">
+        <a {% if has_prev %}href="/ui/videos?page={{ page-1 }}{{ kl }}{{ kt }}{{ kp }}{{ kq }}"
+              hx-get="/ui/videos?page={{ page-1 }}{{ kl }}{{ kt }}{{ kp }}{{ kq }}" hx-target="#videos-results" hx-select="#videos-results" hx-swap="outerHTML" hx-push-url="true"
+           {% else %}aria-disabled="true"{% endif %}
+           class="rounded-lg border px-3 py-1.5 font-medium {% if has_prev %}border-slate-300 text-slate-700 hover:bg-slate-100{% else %}border-slate-200 text-slate-300 pointer-events-none{% endif %}">← Précédent</a>
+        <a {% if has_next %}href="/ui/videos?page={{ page+1 }}{{ kl }}{{ kt }}{{ kp }}{{ kq }}"
+              hx-get="/ui/videos?page={{ page+1 }}{{ kl }}{{ kt }}{{ kp }}{{ kq }}" hx-target="#videos-results" hx-select="#videos-results" hx-swap="outerHTML" hx-push-url="true"
+           {% else %}aria-disabled="true"{% endif %}
+           class="rounded-lg border px-3 py-1.5 font-medium {% if has_next %}border-slate-300 text-slate-700 hover:bg-slate-100{% else %}border-slate-200 text-slate-300 pointer-events-none{% endif %}">Suivant →</a>
+      </div>
+    </div>
   </div>
 </form>
 {% endblock %}
@@ -73,17 +120,17 @@
     selcount.textContent = checked + ' sélectionnée(s)';
     zipsel.disabled = checked === 0;
     delsel.disabled = checked === 0;
-    if (selectall) selectall.checked = all.length > 0 && checked === all.length;
+    const sa = document.getElementById('selectall');
+    if (sa) sa.checked = all.length > 0 && checked === all.length;
   }
-  if (selectall) selectall.addEventListener('change', () => {
-    boxes().forEach(b => b.checked = selectall.checked); refresh();
+  document.addEventListener('change', e => {
+    if (e.target.id === 'selectall') { boxes().forEach(b => b.checked = e.target.checked); refresh(); }
+    else if (e.target.classList.contains('rowcb')) refresh();
   });
-  document.addEventListener('change', e => { if (e.target.classList.contains('rowcb')) refresh(); });
-  // Rows can be replaced by HTMX (bulk delete) or removed (row delete) -> resync.
+  // Rows/results can be replaced by HTMX (search, pagination, bulk delete) -> resync.
   document.body.addEventListener('htmx:afterSwap', e => {
-    if (e.target.id === 'videos-tbody' || e.target.closest('#videos-tbody')) refresh();
+    if (['videos-tbody', 'videos-results'].includes(e.target.id) || e.target.closest('#videos-results')) refresh();
   });
-  document.body.addEventListener('htmx:afterRequest', refresh);
   refresh();
 </script>
 {% endblock %}

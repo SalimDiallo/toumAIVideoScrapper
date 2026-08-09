@@ -1,8 +1,8 @@
-"""The single MVP use case: ingest one YouTube video.
+"""The single MVP use case: ingest one video (YouTube or any yt-dlp platform).
 
 Flow:
-  1. download audio + metadata (yt-dlp)
-  2. try to fetch YouTube captions
+  1. download audio + metadata (yt-dlp) — provider is detected here
+  2. try to fetch captions (routed per provider by the transcript provider)
   3. if none: skip (status = unavailable)
   4. persist the result
 """
@@ -36,7 +36,7 @@ class IngestVideoUseCase:
         metadata, audio = self.downloader.download(video_url, work_dir)
         log.info("audio.downloaded", video_id=metadata.video_id, path=str(audio.path))
 
-        transcript = self.transcript_provider.fetch(metadata.video_id, languages)
+        transcript = self.transcript_provider.fetch(metadata, languages)
 
         if transcript is not None:
             status = TranscriptStatus.AVAILABLE
@@ -52,7 +52,8 @@ class IngestVideoUseCase:
             log.info(
                 "transcript.skipped",
                 video_id=metadata.video_id,
-                reason="no_youtube_captions",
+                provider=metadata.provider,
+                reason="no_captions",
             )
 
         result = IngestionResult(

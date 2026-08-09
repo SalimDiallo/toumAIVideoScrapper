@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor, wait
+from pathlib import Path
 
 import structlog
 from kafka import KafkaConsumer
@@ -11,11 +13,20 @@ from kafka.errors import CommitFailedError
 
 from ..bootstrap import build_job_store, build_publisher
 from ..cli import build_use_case
-from ..config import Settings
+from ..config import Settings, reload_into
 from ..logging_setup import configure_logging
 from .handler import JobHandler
 
 log = structlog.get_logger(__name__)
+
+
+def _env_path() -> Path:
+    return Path(os.environ.get("TOUMAI_ENV_FILE", ".env"))
+
+
+def _env_mtime() -> float:
+    p = _env_path()
+    return p.stat().st_mtime if p.exists() else 0.0
 
 
 def _safe_handle(handler: JobHandler, event: dict) -> None:
@@ -61,9 +72,21 @@ def main() -> None:
         max_concurrent=n,
     )
 
+    env_mtime = _env_mtime()
+
     try:
         with ThreadPoolExecutor(max_workers=n, thread_name_prefix="dl") as pool:
             while True:
+                # Hot-reload download config (proxies, cookies, delays, langues, ASR)
+                # quand .env change — pas besoin de redémarrer le worker. La taille du
+                # pool et la config Kafka restent fixées jusqu'au prochain redémarrage.
+                current = _env_mtime()
+                if current != env_mtime:
+                    env_mtime = current
+                    reload_into(settings, _env_path())
+                    handler.use_case = build_use_case(settings)
+                    log.info("worker.config_reloaded")
+
                 batch = consumer.poll(timeout_ms=1000)
                 if not batch:
                     continue

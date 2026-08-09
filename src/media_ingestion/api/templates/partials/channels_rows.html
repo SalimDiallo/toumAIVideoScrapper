@@ -1,0 +1,49 @@
+{% for c in channels %}
+<tr class="border-b border-slate-100 hover:bg-slate-50/70">
+  <td class="px-4 py-3">
+    <a href="{{ c.url }}" target="_blank" rel="noopener"
+       class="font-medium text-slate-800 hover:text-indigo-600">{{ c.name }}</a>
+    <span class="block font-mono text-xs text-slate-400">{{ c.channel_key }}</span>
+  </td>
+  <td class="px-4 py-3">
+    {% if c.active %}
+    <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
+      <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span> Active
+    </span>
+    {% else %}
+    <span class="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
+      <span class="h-1.5 w-1.5 rounded-full bg-slate-400"></span> Inactive
+    </span>
+    {% endif %}
+  </td>
+  <td class="px-4 py-3 text-xs text-slate-500">{{ c.added_at }}</td>
+  <td class="px-4 py-3 text-xs">
+    {% if c.never_checked %}
+    <span class="text-slate-400">jamais scannée</span>
+    {% else %}
+    <span class="text-slate-600">{{ c.last_checked_ago }}</span>
+    <span class="block text-slate-400">{{ c.last_checked_at }}</span>
+    {% endif %}
+  </td>
+  <td class="px-4 py-3 text-right whitespace-nowrap">
+    {% if c.active %}
+    <button type="button"
+            hx-post="/ui/veille/toggle" hx-vals='{"channel_key": {{ c.channel_key|tojson }}, "active": false}'
+            hx-target="#channels-tbody" hx-swap="innerHTML"
+            class="rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100">⏸ Mettre en pause</button>
+    {% else %}
+    <button type="button"
+            hx-post="/ui/veille/toggle" hx-vals='{"channel_key": {{ c.channel_key|tojson }}, "active": true}'
+            hx-target="#channels-tbody" hx-swap="innerHTML"
+            class="rounded-md border border-emerald-200 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50">▶ Réactiver</button>
+    {% endif %}
+    <button type="button"
+            hx-post="/ui/veille/delete" hx-vals='{"channel_key": {{ c.channel_key|tojson }}}'
+            hx-target="#channels-tbody" hx-swap="innerHTML"
+            hx-confirm="Retirer cette chaîne de la veille ?"
+            class="ml-1 rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50">🗑 Retirer</button>
+  </td>
+</tr>
+{% else %}
+<tr><td colspan="5" class="px-4 py-12 text-center text-sm text-slate-400">Aucune chaîne surveillée.</td></tr>
+{% endfor %}

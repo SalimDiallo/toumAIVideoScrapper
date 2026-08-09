@@ -22,10 +22,12 @@ class FakeStore:
     def get(self, job_id):
         return self.jobs.get(job_id)
 
-    def list(self, *, status=None, limit=50, offset=0):
+    def list(self, *, status=None, q=None, limit=50, offset=0):
         items = list(self.jobs.values())
         if status is not None:
             items = [j for j in items if j.status == status]
+        if q:
+            items = [j for j in items if q.lower() in (j.url or "").lower()]
         return items[offset : offset + limit]
 
     def counts_by_status(self):
@@ -96,12 +98,22 @@ class FakeCatalog:
     def __init__(self, rows=None):
         self.rows = rows or []
 
-    def list(self, *, language=None, transcript=None, limit=50, offset=0):
+    def list(self, *, language=None, transcript=None, provider=None, q=None, limit=50, offset=0):
         rows = self.rows
         if language is not None:
             rows = [r for r in rows if r.get("language") == language]
         if transcript is not None:
             rows = [r for r in rows if r.get("transcript_status") == transcript]
+        if provider is not None:
+            rows = [r for r in rows if r.get("provider") == provider]
+        if q:
+            ql = q.lower()
+            rows = [
+                r for r in rows
+                if ql in (r.get("title") or "").lower()
+                or ql in (r.get("channel") or "").lower()
+                or ql in (r.get("url") or "").lower()
+            ]
         return rows[offset : offset + limit]
 
     def get(self, video_id):
@@ -109,6 +121,36 @@ class FakeCatalog:
 
     def delete(self, video_id):
         self.rows = [r for r in self.rows if r["video_id"] != video_id]
+
+    def stats(self):
+        rows = self.rows
+        total = len(rows)
+        total_dur = sum(int(r.get("duration_s") or 0) for r in rows)
+        avail = sum(1 for r in rows if r.get("transcript_status") == "available")
+
+        def _group(key):
+            agg: dict = {}
+            for r in rows:
+                k = r.get(key) or "?"
+                a = agg.setdefault(k, {"videos": 0, "duration_s": 0})
+                a["videos"] += 1
+                a["duration_s"] += int(r.get("duration_s") or 0)
+            return [{key: k, **v} for k, v in agg.items()]
+
+        by_source: dict = {}
+        for r in rows:
+            k = r.get("transcript_source") or "aucune"
+            by_source[k] = by_source.get(k, 0) + 1
+
+        return {
+            "videos": total,
+            "duration_s": total_dur,
+            "with_transcript": avail,
+            "without_transcript": total - avail,
+            "by_language": _group("language"),
+            "by_provider": _group("provider"),
+            "by_source": [{"source": k, "videos": v} for k, v in by_source.items()],
+        }
 
 
 class FakePlaylistResolver:
@@ -121,7 +163,84 @@ class FakePlaylistResolver:
         return list(self.entries)
 
 
-def _client(storage=None, catalog=None, playlist_resolver=None):
+class FakeChannelStore:
+    def __init__(self, channels=None):
+        self.channels = {c.channel_key: c for c in (channels or [])}
+        self.checked = []
+
+    def add(self, channel):
+        self.channels.setdefault(channel.channel_key, channel)
+
+    def list_active(self):
+        return [c for c in self.channels.values() if c.active]
+
+    def list_all(self):
+        return list(self.channels.values())
+
+    def remove(self, channel_key):
+        self.channels.pop(channel_key, None)
+
+    def set_active(self, channel_key, active):
+        from dataclasses import replace
+
+        c = self.channels.get(channel_key)
+        if c is not None:
+            self.channels[channel_key] = replace(c, active=active)
+
+    def mark_checked(self, channel_key, when):
+        self.checked.append((channel_key, when))
+
+
+class FakeChannelResolver:
+    def __init__(self, by_url=None):
+        # {channel_url: [PlaylistEntry, ...]}
+        self.by_url = by_url or {}
+        self.calls = []
+
+    def recent_uploads(self, channel_url, limit=15):
+        self.calls.append((channel_url, limit))
+        return list(self.by_url.get(channel_url, []))
+
+
+class FakeRunLog:
+    def __init__(self):
+        self.runs = []
+
+    def record(self, checked, queued, detail):
+        from datetime import datetime, timezone
+
+        from media_ingestion.domain.models import VeilleRun
+
+        self.runs.insert(
+            0,
+            VeilleRun(
+                run_id=len(self.runs) + 1,
+                ran_at=datetime.now(timezone.utc),
+                checked=checked,
+                queued=queued,
+                detail=detail,
+            ),
+        )
+
+    def list_recent(self, limit=20):
+        return self.runs[:limit]
+
+    def stats(self):
+        return {
+            "runs": len(self.runs),
+            "queued_total": sum(r.queued for r in self.runs),
+            "last_ran_at": self.runs[0].ran_at if self.runs else None,
+        }
+
+
+def _client(
+    storage=None,
+    catalog=None,
+    playlist_resolver=None,
+    channel_store=None,
+    channel_resolver=None,
+    veille_run_log=None,
+):
     store, pub = FakeStore(), FakePublisher()
     client = TestClient(
         create_app(
@@ -129,8 +248,11 @@ def _client(storage=None, catalog=None, playlist_resolver=None):
             store=store,
             publisher=pub,
             storage=storage,
-            catalog=catalog,
+            catalog=catalog or FakeCatalog(),
             playlist_resolver=playlist_resolver,
+            channel_store=channel_store,
+            channel_resolver=channel_resolver,
+            veille_run_log=veille_run_log or FakeRunLog(),
         )
     )
     return client, store, pub
@@ -268,6 +390,106 @@ def test_ui_root_redirects_to_dashboard():
     r = client.get("/", follow_redirects=False)
     assert r.status_code in (307, 308)
     assert r.headers["location"] == "/ui/"
+
+
+def test_ui_stats_page_shows_audio_volume():
+    rows = [
+        {
+            "video_id": "v1", "url": "http://y/1", "title": "un", "language": "fr",
+            "provider": "youtube", "duration_s": 3600,
+            "transcript_status": "available", "transcript_source": "youtube_manual",
+            "storage_uri": "s3://b/1",
+        },
+        {
+            "video_id": "v2", "url": "http://y/2", "title": "deux", "language": "ar",
+            "provider": "youtube", "duration_s": 1800,
+            "transcript_status": "unavailable", "transcript_source": None,
+            "storage_uri": "s3://b/2",
+        },
+    ]
+    client, _, _ = _client(catalog=FakeCatalog(rows=rows))
+    r = client.get("/ui/stats")
+    assert r.status_code == 200
+    assert "Audio collecté" in r.text
+    assert "1 h 30" in r.text        # 5400s total -> 1 h 30
+    assert "Audio par langue" in r.text
+    # transcript availability: 1 of 2 -> 50 %
+    assert "50 %" in r.text
+
+
+def test_ui_videos_search_and_pagination():
+    rows = [
+        {"video_id": f"v{i}", "url": f"http://y/{i}", "title": f"Vidéo {i}",
+         "channel": "Acme" if i % 2 else "Beta", "language": "fr",
+         "provider": "youtube", "storage_uri": f"s3://b/{i}"}
+        for i in range(60)
+    ]
+    client, _, _ = _client(catalog=FakeCatalog(rows=rows))
+
+    # page 1 shows the search box + a "Suivant" that is enabled (60 > 50)
+    page1 = client.get("/ui/videos")
+    assert page1.status_code == 200
+    assert "Rechercher un titre" in page1.text
+    assert "Suivant" in page1.text and "page=2" in page1.text
+
+    # page 2 exists and links back
+    page2 = client.get("/ui/videos?page=2")
+    assert page2.status_code == 200
+    assert "Précédent" in page2.text and "page=1" in page2.text
+
+    # search narrows results (by channel)
+    hit = client.get("/ui/videos?q=Beta")
+    assert "Vidéo 0" in hit.text  # channel Beta -> even indices
+
+
+def test_ui_jobs_search():
+    client, store, _ = _client()
+    client.post("/process", json={"url": "https://youtu.be/alpha"})
+    client.post("/process", json={"url": "https://youtu.be/beta"})
+
+    rows = client.get("/ui/partials/jobs-rows?q=alpha")
+    assert rows.status_code == 200
+    assert "alpha" in rows.text and "beta" not in rows.text
+    # the search box is on the jobs page
+    page = client.get("/ui/jobs?q=alpha")
+    assert "Rechercher une URL" in page.text
+
+
+def test_ui_dashboard_shows_audio_strip():
+    rows = [{"video_id": "v1", "url": "http://y/1", "duration_s": 7200,
+             "language": "fr", "provider": "youtube", "storage_uri": "s3://b/1"}]
+    client, _, _ = _client(catalog=FakeCatalog(rows=rows))
+    r = client.get("/ui/")
+    assert r.status_code == 200
+    assert "Audio collecté" in r.text and "Voir les statistiques" in r.text
+
+
+def test_ui_video_detail_shows_quality_panel():
+    transcript = {
+        "language": "fr",
+        "source": "youtube_manual",
+        "text": "bonjour le monde",
+        "segments": [
+            {"start_s": 0.0, "duration_s": 50.0, "text": "bonjour"},
+            {"start_s": 50.0, "duration_s": 50.0, "text": "le monde"},
+        ],
+    }
+    rows = [{"video_id": "v1", "url": "http://y/1", "title": "T",
+             "language": "fr", "storage_uri": "s3://b/1"}]
+    from media_ingestion.domain.ports import AudioHandle
+
+    storage = FakeStorage(
+        transcript=transcript,
+        audio=AudioHandle(media_type="audio/wav"),
+        metadata={"video_id": "v1", "duration_s": 100},
+    )
+    client, _, _ = _client(storage=storage, catalog=FakeCatalog(rows=rows))
+    r = client.get("/ui/videos/v1")
+    assert r.status_code == 200
+    assert "Qualité de transcription" in r.text
+    assert "Excellente" in r.text            # full coverage + human source
+    assert "Couverture" in r.text and "100 %" in r.text
+    assert "Sous-titres auteur" in r.text
 
 
 def test_ui_video_detail_shows_synced_segments():
@@ -601,3 +823,246 @@ def test_ui_videos_page_filter_by_transcript():
     # unavailable -> only v2
     unavail = client.get("/ui/videos?transcript=unavailable")
     assert "QWERTYMANQUANT" in unavail.text and "QWERTYAVEC" not in unavail.text
+
+
+# --------------------------------------------------------------------- veille
+def _watched(channel_key, url, name=None, active=True):
+    from media_ingestion.domain.models import WatchedChannel
+
+    return WatchedChannel(channel_key=channel_key, url=url, name=name, active=active)
+
+
+def test_veille_run_queues_new_uploads_and_dedups():
+    url = "https://www.youtube.com/@acme/videos"
+    resolver = FakeChannelResolver({url: _pl_entries("aaaaaaaaaaa", "bbbbbbbbbbb")})
+    cstore = FakeChannelStore([_watched("@acme", url, name="Acme")])
+    client, store, pub = _client(channel_store=cstore, channel_resolver=resolver)
+
+    r = client.post("/veille/run")
+    assert r.status_code == 202
+    body = r.json()
+    assert body["checked"] == 1 and body["queued"] == 2
+    assert len(store.jobs) == 2 and len(pub.events) == 2
+    assert cstore.checked and cstore.checked[0][0] == "@acme"
+
+    # second pass: everything already known -> nothing new
+    r2 = client.post("/veille/run")
+    assert r2.json()["queued"] == 0
+    assert len(store.jobs) == 2
+
+
+def test_veille_run_skips_inactive_channels():
+    active_url = "https://www.youtube.com/@on/videos"
+    off_url = "https://www.youtube.com/@off/videos"
+    resolver = FakeChannelResolver(
+        {active_url: _pl_entries("aaaaaaaaaaa"), off_url: _pl_entries("bbbbbbbbbbb")}
+    )
+    cstore = FakeChannelStore(
+        [_watched("@on", active_url), _watched("@off", off_url, active=False)]
+    )
+    client, store, _ = _client(channel_store=cstore, channel_resolver=resolver)
+
+    body = client.post("/veille/run").json()
+    assert body["checked"] == 1 and body["queued"] == 1
+    assert [c[0] for c in resolver.calls] == [active_url]
+
+
+def test_ui_veille_add_and_list():
+    cstore = FakeChannelStore()
+    client, _, _ = _client(channel_store=cstore)
+
+    r = client.post("/ui/veille/add", data={"channel": "@acme", "name": "Acme"})
+    assert r.status_code == 200 and "Chaîne ajoutée" in r.text
+    assert r.headers.get("HX-Trigger") == "channelsChanged"
+    assert "@acme" in cstore.channels
+    assert cstore.channels["@acme"].url == "https://www.youtube.com/@acme/videos"
+
+    page = client.get("/ui/veille")
+    assert page.status_code == 200 and "Acme" in page.text
+
+
+def test_ui_veille_add_rejects_invalid():
+    cstore = FakeChannelStore()
+    client, _, _ = _client(channel_store=cstore)
+    r = client.post("/ui/veille/add", data={"channel": "not a channel!!"})
+    assert r.status_code == 200 and "non reconnue" in r.text
+    assert not cstore.channels
+
+
+def test_ui_veille_import_csv():
+    cstore = FakeChannelStore([_watched("@existing", "https://www.youtube.com/@existing/videos")])
+    client, _, _ = _client(channel_store=cstore)
+
+    csv_content = (
+        "channel,name\n"
+        "@acme,Acme\n"
+        "https://www.youtube.com/@news,News\n"
+        "@acme,dup within batch\n"          # duplicate within file
+        "@existing,already there\n"          # duplicate of existing
+        "not a channel!!,bad\n"              # invalid
+        ",\n"                                 # empty -> skipped
+    )
+    r = client.post(
+        "/ui/veille/import-csv",
+        files={"file": ("channels.csv", csv_content.encode("utf-8"), "text/csv")},
+    )
+    assert r.status_code == 200
+    assert "2 chaîne(s) ajoutée(s)" in r.text
+    assert "2 doublon(s)" in r.text
+    assert "1 ligne(s) invalide(s)" in r.text
+    assert r.headers.get("HX-Trigger") == "channelsChanged"
+    assert "@acme" in cstore.channels and "@news" in cstore.channels
+
+
+def test_ui_veille_import_csv_rejects_missing_column():
+    client, _, _ = _client(channel_store=FakeChannelStore())
+    r = client.post(
+        "/ui/veille/import-csv",
+        files={"file": ("bad.csv", b"foo,bar\n1,2\n", "text/csv")},
+    )
+    assert r.status_code == 200
+    assert "Le CSV doit contenir une colonne" in r.text
+
+
+def test_api_veille_channels_csv():
+    cstore = FakeChannelStore()
+    client, _, _ = _client(channel_store=cstore)
+    csv_content = "channel\n@acme\nhttps://www.youtube.com/@news\nbogus!!\n"
+    r = client.post(
+        "/veille/channels/csv",
+        files={"file": ("channels.csv", csv_content.encode(), "text/csv")},
+    )
+    assert r.status_code == 202
+    body = r.json()
+    assert body == {"added": 2, "duplicates": 0, "invalid": 1}
+    assert len(cstore.channels) == 2
+
+
+def test_ui_settings_page_renders():
+    client, _, _ = _client()
+    r = client.get("/ui/settings")
+    assert r.status_code == 200
+    assert "Proxies de téléchargement" in r.text
+    assert "appliqué immédiatement" in r.text
+
+
+def test_ui_settings_save_writes_env(tmp_path, monkeypatch):
+    env = tmp_path / ".env"
+    monkeypatch.setenv("TOUMAI_ENV_FILE", str(env))
+    client, _, _ = _client()
+
+    r = client.post(
+        "/ui/settings",
+        data={
+            "languages": "fr, en",
+            "proxies": "http://ip1:8080\nhttp://ip2:8080",
+            "webshare_username": "user1",
+            "veille_recent_limit": "20",
+            "max_concurrent_downloads": "5",
+            "download_delay_min_s": "1.5",
+            "download_delay_max_s": "5",
+            "accept_youtube_asr": "true",
+        },
+    )
+    assert r.status_code == 200 and "appliquée" in r.text
+    content = env.read_text(encoding="utf-8")
+    assert 'TOUMAI_DOWNLOAD_PROXIES=["http://ip1:8080", "http://ip2:8080"]' in content
+    assert 'TOUMAI_LANGUAGES=["fr", "en"]' in content
+    assert "TOUMAI_WEBSHARE_PROXY_USERNAME=user1" in content
+    assert "TOUMAI_VEILLE_RECENT_LIMIT=20" in content
+    assert "TOUMAI_ACCEPT_YOUTUBE_ASR=true" in content
+    # unchecked box -> false
+    assert "TOUMAI_ENABLE_TRANSCRIPT_TRANSLATION=false" in content
+
+    # applied live (no restart): the settings page now reflects the new values
+    page = client.get("/ui/settings")
+    assert 'value="20"' in page.text            # veille_recent_limit
+    assert "http://ip1:8080" in page.text        # proxies textarea
+    assert "user1" in page.text                   # webshare username
+
+
+def test_ui_veille_toggle_pause_resume():
+    url = "https://www.youtube.com/@acme/videos"
+    cstore = FakeChannelStore([_watched("@acme", url, name="Acme")])
+    client, _, _ = _client(channel_store=cstore)
+
+    r = client.post("/ui/veille/toggle", data={"channel_key": "@acme", "active": "false"})
+    assert r.status_code == 200
+    assert cstore.channels["@acme"].active is False
+    assert r.headers.get("HX-Trigger") == "channelsChanged"
+    assert "Réactiver" in r.text
+
+    r = client.post("/ui/veille/toggle", data={"channel_key": "@acme", "active": "true"})
+    assert cstore.channels["@acme"].active is True
+    assert "Mettre en pause" in r.text
+
+
+def test_ui_veille_delete():
+    url = "https://www.youtube.com/@acme/videos"
+    cstore = FakeChannelStore([_watched("@acme", url, name="Acme")])
+    client, _, _ = _client(channel_store=cstore)
+
+    r = client.post("/ui/veille/delete", data={"channel_key": "@acme"})
+    assert r.status_code == 200
+    assert "@acme" not in cstore.channels
+    assert "Aucune chaîne" in r.text  # empty rows partial
+
+
+def test_ui_veille_run_now():
+    url = "https://www.youtube.com/@acme/videos"
+    resolver = FakeChannelResolver({url: _pl_entries("aaaaaaaaaaa")})
+    cstore = FakeChannelStore([_watched("@acme", url)])
+    client, store, _ = _client(channel_store=cstore, channel_resolver=resolver)
+
+    r = client.post("/ui/veille/run")
+    assert r.status_code == 200 and "Veille lancée" in r.text
+    assert r.headers.get("HX-Trigger") == "channelsChanged"
+    assert len(store.jobs) == 1
+
+
+def test_veille_run_is_logged_and_visible():
+    url = "https://www.youtube.com/@acme/videos"
+    resolver = FakeChannelResolver({url: _pl_entries("aaaaaaaaaaa", "bbbbbbbbbbb")})
+    cstore = FakeChannelStore([_watched("@acme", url, name="Acme")])
+    runlog = FakeRunLog()
+    client, _, _ = _client(
+        channel_store=cstore, channel_resolver=resolver, veille_run_log=runlog
+    )
+
+    client.post("/veille/run")
+    assert len(runlog.runs) == 1 and runlog.runs[0].queued == 2
+
+    # JSON monitoring log
+    runs = client.get("/veille/runs").json()
+    assert runs and runs[0]["checked"] == 1 and runs[0]["queued"] == 2
+
+    # rendered on the veille page + refreshable partials
+    page = client.get("/ui/veille")
+    assert "Journal de suivi" in page.text
+    assert "Acme" in page.text and "+2" in page.text
+    rows = client.get("/ui/veille/partials/runs")
+    assert "Acme" in rows.text and "+2" in rows.text
+
+
+def test_ui_veille_kpis():
+    url = "https://www.youtube.com/@acme/videos"
+    resolver = FakeChannelResolver({url: _pl_entries("aaaaaaaaaaa", "bbbbbbbbbbb")})
+    cstore = FakeChannelStore(
+        [_watched("@acme", url, name="Acme"), _watched("@off", url, active=False)]
+    )
+    runlog = FakeRunLog()
+    client, _, _ = _client(
+        channel_store=cstore, channel_resolver=resolver, veille_run_log=runlog
+    )
+
+    # before any run: KPIs render with zeros / one active channel
+    kpis = client.get("/ui/veille/partials/kpis")
+    assert kpis.status_code == 200
+    assert "Chaînes surveillées" in kpis.text
+    assert "Vidéos filées" in kpis.text
+
+    client.post("/veille/run")
+    kpis = client.get("/ui/veille/partials/kpis").text
+    # cumulative queued total (2) shown, and only 1 active channel scanned
+    assert "+2" in kpis or ">2<" in kpis
+    assert "actives" in kpis

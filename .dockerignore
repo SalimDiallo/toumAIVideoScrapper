@@ -1,0 +1,13 @@
+.venv/
+data/
+__pycache__/
+*.pyc
+.git/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+tests/
+airflow/logs/
+compose-output.txt
+*.env
+cookies.txt

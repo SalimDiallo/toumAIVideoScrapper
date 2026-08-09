@@ -8,10 +8,20 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
-from .models import AudioAsset, IngestionResult, Job, JobStatus, Transcript, VideoMetadata
+from .models import (
+    AudioAsset,
+    IngestionResult,
+    Job,
+    JobStatus,
+    Transcript,
+    VeilleRun,
+    VideoMetadata,
+    WatchedChannel,
+)
 
 
 @dataclass(frozen=True)
@@ -37,8 +47,13 @@ class AudioDownloaderPort(Protocol):
 
 
 class TranscriptProviderPort(Protocol):
-    def fetch(self, video_id: str, languages: list[str]) -> Transcript | None:
-        """Return a transcript if one exists, else None (no captions available)."""
+    def fetch(self, metadata: VideoMetadata, languages: list[str]) -> Transcript | None:
+        """Return a transcript if one exists, else None (no captions available).
+
+        Takes the whole `metadata` (not just the id) so an implementation can route
+        on `metadata.provider` and reach the source `metadata.url` when it needs to
+        re-query the platform (e.g. pulling subtitles through yt-dlp).
+        """
         ...
 
 
@@ -56,6 +71,62 @@ class PlaylistResolverPort(Protocol):
         """Expand a playlist URL/id into its video entries (no download).
 
         Returns an empty list when the playlist is empty or cannot be read.
+        """
+        ...
+
+
+class ChannelResolverPort(Protocol):
+    def recent_uploads(self, channel_url: str, limit: int = 15) -> list[PlaylistEntry]:
+        """List a channel's most recent uploads (flat, no download), newest first.
+
+        Returns an empty list when the channel is empty or cannot be read.
+        """
+        ...
+
+
+class ChannelWatchStorePort(Protocol):
+    """Registry of channels under daily surveillance (the "veille")."""
+
+    def add(self, channel: WatchedChannel) -> None:
+        """Register a channel. Idempotent per channel_key (re-add is a no-op)."""
+        ...
+
+    def list_active(self) -> list[WatchedChannel]:
+        """Channels the veille should check (active only)."""
+        ...
+
+    def list_all(self) -> list[WatchedChannel]:
+        """Every registered channel (for the management UI)."""
+        ...
+
+    def remove(self, channel_key: str) -> None:
+        """Unregister a channel. Idempotent."""
+        ...
+
+    def set_active(self, channel_key: str, active: bool) -> None:
+        """Pause (active=False) or resume (active=True) surveillance of a channel."""
+        ...
+
+    def mark_checked(self, channel_key: str, when: datetime) -> None:
+        """Record the timestamp of the last veille pass for this channel."""
+        ...
+
+
+class VeilleRunLogPort(Protocol):
+    """Append-only history of veille passes (the monitoring log)."""
+
+    def record(self, checked: int, queued: int, detail: list[dict]) -> None:
+        """Log one completed veille pass."""
+        ...
+
+    def list_recent(self, limit: int = 20) -> list[VeilleRun]:
+        """Most recent passes first (for the UI history)."""
+        ...
+
+    def stats(self) -> dict:
+        """All-time aggregates for the dashboard KPIs.
+
+        Returns ``{"runs": int, "queued_total": int, "last_ran_at": datetime | None}``.
         """
         ...
 
@@ -100,13 +171,16 @@ class MetadataRepositoryPort(Protocol):
         *,
         language: str | None = None,
         transcript: str | None = None,
+        provider: str | None = None,
+        q: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict]:
         """List catalog rows, most recent first.
 
-        Optionally filtered by `language` and/or `transcript` status
-        ("available" / "unavailable").
+        Optionally filtered by `language`, `transcript` status
+        ("available" / "unavailable"), origin `provider`, and/or a free-text
+        query `q` (matched against title / channel / URL).
         """
         ...
 
@@ -116,6 +190,23 @@ class MetadataRepositoryPort(Protocol):
 
     def delete(self, video_id: str) -> None:
         """Remove a catalog row by video_id. Idempotent."""
+        ...
+
+    def stats(self) -> dict:
+        """Catalog-wide aggregates for the analytics page.
+
+        Returns totals plus breakdowns::
+
+            {
+              "videos": int,
+              "duration_s": int,               # total audio collected
+              "with_transcript": int,
+              "without_transcript": int,
+              "by_language": [{"language", "videos", "duration_s"}],
+              "by_provider": [{"provider", "videos", "duration_s"}],
+              "by_source":   [{"source", "videos"}],
+            }
+        """
         ...
 
 
@@ -137,9 +228,15 @@ class JobStorePort(Protocol):
     def get(self, job_id: str) -> Job | None: ...
 
     def list(
-        self, *, status: JobStatus | None = None, limit: int = 50, offset: int = 0
+        self,
+        *,
+        status: JobStatus | None = None,
+        q: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[Job]:
-        """List jobs, most recent first, optionally filtered by status."""
+        """List jobs, most recent first, optionally filtered by status and/or a
+        free-text query `q` (matched against the URL)."""
         ...
 
     def counts_by_status(self) -> dict[str, int]:
@@ -166,4 +263,3 @@ class JobStorePort(Protocol):
         result_uri: str | None = None,
         error: str | None = None,
     ) -> None: ...
-
