@@ -31,8 +31,33 @@ class MinioStorage:
         bucket: str,
         secure: bool = False,
         layer: str = "bronze",
+        public_endpoint: str | None = None,
+        region: str = "us-east-1",
     ) -> None:
-        self._client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
+        self._client = Minio(
+            endpoint, access_key=access_key, secret_key=secret_key, secure=secure, region=region
+        )
+        # Presigned URLs are handed to the *browser*, which can't resolve an internal
+        # Docker hostname like "minio:9000". When the server talks to MinIO over an
+        # internal endpoint, `public_endpoint` (e.g. "localhost:9000" or a real domain)
+        # is the host the browser will actually reach. The host is part of the S3
+        # signature, so we presign with a client bound to that public host instead of
+        # rewriting the URL after the fact.
+        #
+        # `region` is pinned so presigning stays offline: otherwise minio-py issues a
+        # GetBucketLocation call against the (public) endpoint to discover the region,
+        # which fails when that endpoint isn't reachable from the server side.
+        self._presign_client = (
+            Minio(
+                public_endpoint,
+                access_key=access_key,
+                secret_key=secret_key,
+                secure=secure,
+                region=region,
+            )
+            if public_endpoint
+            else self._client
+        )
         self._bucket = bucket
         self._layer = layer
         self._ensure_bucket()
@@ -47,7 +72,14 @@ class MinioStorage:
         audio_path = result.audio.path
         audio_key = f"{prefix}/{audio_path.name}"
         if audio_path.exists():
-            self._client.fput_object(self._bucket, audio_key, str(audio_path))
+            # Set the real audio MIME type; without it minio-py stores the object as
+            # application/octet-stream, which browsers refuse to play in <audio>.
+            self._client.fput_object(
+                self._bucket,
+                audio_key,
+                str(audio_path),
+                content_type=audio_media_type(audio_path.suffix),
+            )
             audio_location = f"s3://{self._bucket}/{audio_key}"
         else:
             audio_location = ""
@@ -91,13 +123,20 @@ class MinioStorage:
         audio_key = self._audio_key(storage_uri)
         if audio_key is None:
             return None
+        media_type = audio_media_type(Path(audio_key).suffix)
         try:
-            url = self._client.presigned_get_object(
-                self._bucket, audio_key, expires=timedelta(hours=2)
+            # Force the response Content-Type via the presigned URL so the browser
+            # gets e.g. audio/wav even for objects stored (before this fix) as
+            # application/octet-stream — no re-upload needed.
+            url = self._presign_client.presigned_get_object(
+                self._bucket,
+                audio_key,
+                expires=timedelta(hours=2),
+                response_headers={"response-content-type": media_type},
             )
         except Exception:  # noqa: BLE001 - signing failed
             return None
-        return AudioHandle(media_type=audio_media_type(Path(audio_key).suffix), url=url)
+        return AudioHandle(media_type=media_type, url=url)
 
     def read_audio(self, storage_uri: str) -> tuple[str, Iterator[bytes]] | None:
         audio_key = self._audio_key(storage_uri)

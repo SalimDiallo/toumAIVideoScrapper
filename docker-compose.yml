@@ -89,6 +89,8 @@ services:
       TOUMAI_POSTGRES_DSN: postgresql+psycopg://toumai:toumai@postgres:5432/toumai
       TOUMAI_METADATA_BACKEND: postgres
       TOUMAI_MINIO_ENDPOINT: minio:9000
+      # endpoint public pour signer les URLs audio remises au navigateur (voir §7 doc)
+      TOUMAI_MINIO_PUBLIC_ENDPOINT: localhost:9000
     ports:
       - "8000:8000"
     volumes:

@@ -65,6 +65,16 @@ class Settings(BaseSettings):
     minio_secret_key: str = "minioadmin"
     minio_bucket: str = "toumai-media"
     minio_secure: bool = False
+    # Endpoint public utilisé UNIQUEMENT pour signer les URLs présignées remises au
+    # navigateur. À renseigner quand le serveur atteint MinIO via un hôte interne non
+    # résoluble côté navigateur (ex. conteneur : interne "minio:9000", public
+    # "localhost:9000" en dev ou un vrai domaine en prod). Vide = on réutilise l'endpoint.
+    minio_public_endpoint: str | None = None
+    # Région S3 épinglée. Sans elle, minio-py fait un appel réseau GetBucketLocation
+    # au moment de signer une URL — ce qui échoue quand le client de presign vise un
+    # endpoint public injoignable depuis le serveur (ex. "localhost:9000" vu depuis un
+    # conteneur). La valeur par défaut de MinIO est "us-east-1".
+    minio_region: str = "us-east-1"
 
     # metadata catalog
     metadata_backend: Literal["none", "postgres"] = "none"
