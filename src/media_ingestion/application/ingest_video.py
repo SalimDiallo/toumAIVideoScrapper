@@ -1,4 +1,4 @@
-"""The single MVP use case: ingest one video (YouTube or any yt-dlp platform).
+"""Core use case: ingest one video (YouTube or any yt-dlp platform).
 
 Flow:
   1. download audio + metadata (yt-dlp) — provider is detected here
@@ -30,7 +30,7 @@ class IngestVideoUseCase:
     downloader: AudioDownloaderPort
     transcript_provider: TranscriptProviderPort
     storage: StoragePort
-    metadata_repo: MetadataRepositoryPort | None = None  # Phase 2: Postgres catalog. None = skip.
+    metadata_repo: MetadataRepositoryPort | None = None  # Postgres catalog; None = skip indexing.
 
     def execute(self, video_url: str, work_dir: Path, languages: list[str]) -> IngestionResult:
         metadata, audio = self.downloader.download(video_url, work_dir)

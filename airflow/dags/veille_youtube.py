@@ -28,7 +28,7 @@ with DAG(
     default_args=default_args,
     # Chaque matin à 06:00 (heure du scheduler).
     schedule="0 6 * * *",
-    start_date=datetime(2024, 1, 1),
+    start_date=datetime(2026, 1, 1),
     catchup=False,
     max_active_runs=1,
     tags=["toumai", "veille"],

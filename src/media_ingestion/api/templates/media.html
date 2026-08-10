@@ -25,9 +25,6 @@
     <div class="flex flex-wrap items-center gap-3">
       <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Qualité de transcription</span>
       <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset {{ quality.badge }}">{{ quality.label }}</span>
-      {% if quality.available %}
-      <span class="text-xs text-slate-400">indice estimé {{ quality.score }}/100</span>
-      {% endif %}
       <span class="ml-auto text-xs text-slate-400" title="Estimation heuristique — aucune transcription de référence n'est comparée.">ⓘ estimation</span>
     </div>
 
