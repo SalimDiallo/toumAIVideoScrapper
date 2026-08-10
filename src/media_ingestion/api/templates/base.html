@@ -57,6 +57,21 @@
   </div>
 </div>
 
+<!-- Styled replacement for the browser's native confirm() dialog. Any element
+     with hx-confirm shows this modal instead (wired via the htmx:confirm event). -->
+<div id="confirm-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+  <div class="w-full max-w-md rounded-xl bg-white p-5 shadow-xl ring-1 ring-slate-200">
+    <h3 class="text-base font-semibold text-slate-800">Confirmer l'action</h3>
+    <p id="confirm-modal-msg" class="mt-1 text-sm text-slate-500"></p>
+    <div class="mt-5 flex justify-end gap-2">
+      <button id="confirm-modal-cancel" type="button"
+              class="rounded-lg px-3 py-2 text-sm font-medium text-slate-500 hover:bg-slate-50">Annuler</button>
+      <button id="confirm-modal-ok" type="button"
+              class="rounded-lg bg-rose-600 px-3 py-2 text-sm font-medium text-white hover:bg-rose-700">Confirmer</button>
+    </div>
+  </div>
+</div>
+
 <script>
   // --- Optimisation ressources : suspendre le polling quand l'onglet est masqué ---
   document.body.addEventListener('htmx:beforeRequest', function (e) {
@@ -74,6 +89,32 @@
       });
     }
   });
+
+  // --- Confirmation stylée : remplace le confirm() natif pour tout hx-confirm ---
+  (function () {
+    const modal = document.getElementById('confirm-modal');
+    const msg = document.getElementById('confirm-modal-msg');
+    const okBtn = document.getElementById('confirm-modal-ok');
+    const cancelBtn = document.getElementById('confirm-modal-cancel');
+    let pending = null;  // the htmx event whose request we re-issue on confirm
+
+    function close() { modal.classList.add('hidden'); pending = null; }
+
+    // Delegated on body so it also covers rows swapped in by HTMX.
+    document.body.addEventListener('htmx:confirm', function (evt) {
+      if (!evt.detail.elt.hasAttribute('hx-confirm')) return;  // no prompt requested
+      evt.preventDefault();  // suppress the browser's native confirm()
+      msg.textContent = evt.detail.question || 'Confirmer cette action ?';
+      pending = evt.detail;
+      modal.classList.remove('hidden');
+    });
+    okBtn.addEventListener('click', function () {
+      const p = pending; close();
+      if (p) p.issueRequest(true);  // re-issue, skipping the confirm to avoid a loop
+    });
+    cancelBtn.addEventListener('click', close);
+    modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
+  })();
 </script>
 {% block scripts %}{% endblock %}
 </body>
