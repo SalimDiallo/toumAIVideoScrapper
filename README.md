@@ -3,7 +3,7 @@
 Scraper multi-plateformes (audio + transcript) construit en **Clean Architecture / ports-adapters**.
 Tout ce que **yt-dlp** sait lire est ingérable : YouTube, Vimeo, Dailymotion, TikTok,
 Rumble, Odysee, PeerTube, Reddit (voir la liste plus bas).
-Phase 1 = MVP fonctionnel. Phase 2 = branchement Kafka / MinIO / Postgres sans réécrire le cœur.
+Le cœur (domaine + use case) est découplé de l'infra : Kafka / MinIO / Postgres sont des adapters branchés sans réécrire le métier.
 
 ## Stratégie transcript
 
@@ -27,9 +27,9 @@ src/media_ingestion/
 ├── adapters/        # implémentations des ports (remplaçables)
 │   ├── ytdlp_downloader.py       # AudioDownloaderPort
 │   ├── youtube_transcript.py     # TranscriptProviderPort
-│   └── local_storage.py          # StoragePort (→ MinIO en Phase 2)
+│   └── local_storage.py          # StoragePort (ou MinIO/S3)
 ├── config.py        # settings env-driven (TOUMAI_*)
-└── cli.py           # point d'entrée MVP (→ worker Kafka en Phase 2)
+└── cli.py           # point d'entrée CLI (le worker Kafka pilote le même use case)
 ```
 
 Le use case ne dépend **que des ports**. Passer à MinIO/Kafka = écrire un nouvel adapter, le use case ne change pas.

@@ -336,7 +336,6 @@ def build_asgi() -> FastAPI:
 def main() -> None:
     import uvicorn
 
-    settings = Settings()
     uvicorn.run(
         "media_ingestion.api.app:build_asgi",
         factory=True,
@@ -344,4 +343,3 @@ def main() -> None:
         port=8000,
         log_level="info",
     )
-    _ = settings  # placeholder for future host/port config

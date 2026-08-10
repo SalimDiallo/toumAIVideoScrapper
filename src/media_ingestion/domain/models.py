@@ -65,7 +65,6 @@ class VideoMetadata:
 class AudioAsset:
     path: Path
     format: str
-    sample_rate: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

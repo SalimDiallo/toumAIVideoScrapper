@@ -2,7 +2,7 @@
 
 Accepts any URL yt-dlp can read (YouTube, Vimeo, Dailymotion, TikTok, Rumble,
 Odysee, PeerTube, Reddit, ...). This wires the concrete adapters into the use
-case. In Phase 2 the same use case is driven by a Kafka worker instead of this CLI.
+case; the same use case is also driven by the Kafka worker (see worker/consumer).
 """
 
 from __future__ import annotations
