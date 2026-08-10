@@ -188,6 +188,14 @@ class MetadataRepositoryPort(Protocol):
         """Fetch a single catalog row by video_id, or None if unknown."""
         ...
 
+    def existing_video_ids(self, video_ids: Iterable[str]) -> set[str]:
+        """Subset of `video_ids` that currently exist in the catalog.
+
+        Lets the jobs view tell, in one query, which completed jobs still have
+        their ingested video (vs. one whose video was deleted → offer a replay).
+        """
+        ...
+
     def delete(self, video_id: str) -> None:
         """Remove a catalog row by video_id. Idempotent."""
         ...

@@ -22,17 +22,28 @@
   <td class="px-4 py-3 whitespace-nowrap text-xs text-slate-500">{{ j.created_at }}</td>
   <td class="px-4 py-3 whitespace-nowrap text-xs text-slate-500">{{ j.updated_at }}</td>
   <td class="px-4 py-3 text-right whitespace-nowrap">
-    {% if j.can_retry %}
+    {% if j.can_retry or j.can_replay %}
     <form hx-post="/ui/jobs/{{ j.id }}/retry" hx-target="#jobs-tbody" hx-swap="innerHTML" class="inline">
       <input type="hidden" name="status" value="{{ status or '' }}">
       <input type="hidden" name="q" value="{{ q or '' }}">
       {% if selectable %}<input type="hidden" name="selectable" value="1">{% endif %}
+      {% if j.can_replay %}
+      <button title="La vidéo a été supprimée — relancer l'ingestion" class="rounded-md border border-amber-200 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50">⟳ Rejouer</button>
+      {% else %}
       <button class="rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100">↻ Retry</button>
+      {% endif %}
     </form>
     {% endif %}
     {% if j.has_transcript %}
     <a href="/ui/jobs/{{ j.id }}/transcript" class="ml-1 rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50">Transcript</a>
     {% endif %}
+    {% if j.has_video %}
+    {# Job has a surviving video → ask whether to delete it too, via a modal. #}
+    <button type="button"
+            hx-get="/ui/jobs/{{ j.id }}/delete-dialog?status={{ status or '' }}&q={{ q or '' }}{% if selectable %}&selectable=1{% endif %}"
+            hx-target="#modal" hx-swap="innerHTML"
+            class="ml-1 rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50">🗑</button>
+    {% else %}
     <form hx-post="/ui/jobs/{{ j.id }}/delete" hx-target="#jobs-tbody" hx-swap="innerHTML"
           hx-confirm="Supprimer ce job ?" class="inline">
       <input type="hidden" name="status" value="{{ status or '' }}">
@@ -40,6 +51,7 @@
       {% if selectable %}<input type="hidden" name="selectable" value="1">{% endif %}
       <button type="submit" class="ml-1 rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50">🗑</button>
     </form>
+    {% endif %}
   </td>
 </tr>
 {% else %}

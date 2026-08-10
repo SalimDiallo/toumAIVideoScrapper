@@ -119,6 +119,10 @@ class FakeCatalog:
     def get(self, video_id):
         return next((r for r in self.rows if r["video_id"] == video_id), None)
 
+    def existing_video_ids(self, video_ids):
+        wanted = {v for v in video_ids if v}
+        return {r["video_id"] for r in self.rows if r["video_id"] in wanted}
+
     def delete(self, video_id):
         self.rows = [r for r in self.rows if r["video_id"] != video_id]
 
@@ -617,6 +621,79 @@ def test_ui_delete_job_removes_it():
     r = client.post(f"/ui/jobs/{job_id}/delete", data={"status": ""})
     assert r.status_code == 200
     assert job_id not in store.jobs
+
+
+def _completed_job(store, job_id="j1", video_id="v1", url="http://y/1"):
+    """Seed a COMPLETED job tied to a video (bypasses the async worker)."""
+    from media_ingestion.domain.models import Job
+
+    store.jobs[job_id] = Job(
+        job_id=job_id,
+        url=url,
+        languages=["fr"],
+        status=JobStatus.COMPLETED,
+        result_uri="s3://b/1",
+        video_id=video_id,
+    )
+    return job_id
+
+
+def test_ui_delete_job_with_video_also_deletes_video():
+    storage = FakeStorage(audio_bytes=b"x")
+    catalog = FakeCatalog(rows=[{"video_id": "v1", "url": "http://y/1", "storage_uri": "s3://b/1"}])
+    client, store, _ = _client(storage=storage, catalog=catalog)
+    job_id = _completed_job(store)
+
+    r = client.post(f"/ui/jobs/{job_id}/delete", data={"delete_video": "true"})
+    assert r.status_code == 200
+    assert job_id not in store.jobs
+    assert catalog.get("v1") is None  # video removed too
+    assert storage.deleted == ["s3://b/1"]  # and its audio
+
+
+def test_ui_delete_job_keeps_video_by_default():
+    storage = FakeStorage(audio_bytes=b"x")
+    catalog = FakeCatalog(rows=[{"video_id": "v1", "url": "http://y/1", "storage_uri": "s3://b/1"}])
+    client, store, _ = _client(storage=storage, catalog=catalog)
+    job_id = _completed_job(store)
+
+    r = client.post(f"/ui/jobs/{job_id}/delete")  # no delete_video flag
+    assert r.status_code == 200
+    assert job_id not in store.jobs
+    assert catalog.get("v1") is not None  # video untouched
+    assert storage.deleted == []
+
+
+def test_ui_delete_dialog_offers_video_option():
+    catalog = FakeCatalog(rows=[{"video_id": "v1", "url": "http://y/1", "title": "Ma vidéo"}])
+    client, store, _ = _client(catalog=catalog)
+    job_id = _completed_job(store)
+
+    r = client.get(f"/ui/jobs/{job_id}/delete-dialog")
+    assert r.status_code == 200
+    assert "Supprimer le job et la vidéo" in r.text
+    assert "Supprimer le job seulement" in r.text
+    assert "Ma vidéo" in r.text
+
+
+def test_ui_job_shows_replay_when_video_deleted():
+    # Completed job whose video is no longer in the catalog -> offer a replay.
+    client, store, _ = _client(catalog=FakeCatalog(rows=[]))
+    _completed_job(store)
+
+    rows = client.get("/ui/partials/jobs-rows")
+    assert "Rejouer" in rows.text
+    assert "/delete-dialog" not in rows.text  # no video to prompt about
+
+
+def test_ui_job_with_surviving_video_prompts_no_replay():
+    catalog = FakeCatalog(rows=[{"video_id": "v1", "url": "http://y/1"}])
+    client, store, _ = _client(catalog=catalog)
+    _completed_job(store)
+
+    rows = client.get("/ui/partials/jobs-rows")
+    assert "Rejouer" not in rows.text  # video still there, nothing to redo
+    assert "/delete-dialog" in rows.text  # delete asks about the video
 
 
 def test_ui_bulk_delete_jobs():

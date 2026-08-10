@@ -2,6 +2,9 @@
 {% block heading %}Jobs{% endblock %}
 {% block content %}
 
+{# Delete-confirmation modal target (kept outside the auto-refreshed table). #}
+<div id="modal"></div>
+
 <div id="kpis" hx-get="/ui/partials/kpis" hx-trigger="every 5s" hx-swap="innerHTML">
   {% include "partials/kpis.html" %}
 </div>

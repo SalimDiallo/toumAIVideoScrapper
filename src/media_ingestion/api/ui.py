@@ -108,9 +108,16 @@ def _fmt_relative(value: datetime | None) -> str:
     return f"il y a {days} j"
 
 
-def _job_vm(job: Job) -> dict:
-    """View-model: everything a template needs, pre-formatted."""
+def _job_vm(job: Job, *, video_exists: bool = True) -> dict:
+    """View-model: everything a template needs, pre-formatted.
+
+    ``video_exists`` says whether this job's ingested video is still in the
+    catalog. A completed job whose video was deleted can no longer be opened, so
+    we offer a *replay* instead; and deleting such a job needs no "also delete
+    the video?" prompt.
+    """
     meta = STATUS_META.get(job.status.value, STATUS_META["pending"])
+    has_video = bool(job.video_id) and video_exists
     return {
         "id": job.job_id,
         "short_id": job.job_id[:8],
@@ -126,6 +133,8 @@ def _job_vm(job: Job) -> dict:
         "updated_at": _fmt_dt(job.updated_at),
         "can_retry": job.status is JobStatus.FAILED,
         "has_transcript": job.status is JobStatus.COMPLETED and bool(job.result_uri),
+        "has_video": has_video,
+        "can_replay": job.status is JobStatus.COMPLETED and bool(job.video_id) and not video_exists,
     }
 
 
@@ -662,11 +671,18 @@ def mount_ui(
     def partial_kpis(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(request, "partials/kpis.html", {"kpis": _kpis()})
 
+    def _job_vms(jobs: list[Job]) -> list[dict]:
+        """Build job view-models, resolving in one query which jobs still have
+        their video in the catalog (drives the replay button / delete prompt)."""
+        wanted = {j.video_id for j in jobs if j.video_id and j.status is JobStatus.COMPLETED}
+        existing = get_catalog().existing_video_ids(wanted) if wanted else set()
+        return [_job_vm(j, video_exists=j.video_id in existing) for j in jobs]
+
     def _jobs_rows(
         request: Request, status: str | None, selectable: bool, q: str | None = None
     ) -> HTMLResponse:
         status_enum = JobStatus(status) if status in STATUS_META else None
-        jobs = [_job_vm(j) for j in store.list(status=status_enum, q=q or None, limit=100)]
+        jobs = _job_vms(store.list(status=status_enum, q=q or None, limit=100))
         return templates.TemplateResponse(
             request,
             "partials/jobs_rows.html",
@@ -682,7 +698,7 @@ def mount_ui(
         selectable: bool = False,
     ) -> HTMLResponse:
         status_enum = JobStatus(status) if status in STATUS_META else None
-        jobs = [_job_vm(j) for j in store.list(status=status_enum, q=(q or "").strip() or None, limit=limit)]
+        jobs = _job_vms(store.list(status=status_enum, q=(q or "").strip() or None, limit=limit))
         return templates.TemplateResponse(
             request,
             "partials/jobs_rows.html",
@@ -712,6 +728,35 @@ def mount_ui(
             )
         return _jobs_rows(request, status, selectable, q)
 
+    @router.get("/jobs/{job_id}/delete-dialog", response_class=HTMLResponse)
+    def delete_job_dialog(
+        request: Request,
+        job_id: str,
+        status: str | None = None,
+        selectable: bool = False,
+        q: str | None = None,
+    ) -> HTMLResponse:
+        """Modal asking whether to also delete the job's associated video.
+
+        Only opened for jobs whose video is still in the catalog; jobs without a
+        (surviving) video are deleted directly from the row (no prompt).
+        """
+        job = store.get(job_id)
+        if job is None:
+            return HTMLResponse("")
+        video = get_catalog().get(job.video_id) if job.video_id else None
+        return templates.TemplateResponse(
+            request,
+            "partials/job_delete_modal.html",
+            {
+                "job": _job_vm(job, video_exists=video is not None),
+                "video": video,
+                "status": status,
+                "selectable": selectable,
+                "q": q,
+            },
+        )
+
     @router.post("/jobs/{job_id}/delete", response_class=HTMLResponse)
     def delete_job(
         request: Request,
@@ -719,7 +764,11 @@ def mount_ui(
         status: str | None = Form(default=None),
         selectable: bool = Form(default=False),
         q: str | None = Form(default=None),
+        delete_video: bool = Form(default=False),
     ) -> HTMLResponse:
+        job = store.get(job_id)
+        if job is not None and delete_video and job.video_id:
+            _delete_video(job.video_id)  # drop the ingested audio + catalog row too
         store.delete(job_id)
         return _jobs_rows(request, status, selectable, q)
 

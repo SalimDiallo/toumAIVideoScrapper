@@ -6,6 +6,8 @@ queryable index; the raw artifacts live in object storage (MinIO Bronze).
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 import structlog
 from sqlalchemy import (
     Column,
@@ -115,6 +117,14 @@ class PostgresMetadataRepository:
         with self._engine.connect() as conn:
             row = conn.execute(stmt).mappings().first()
         return dict(row) if row is not None else None
+
+    def existing_video_ids(self, video_ids: Iterable[str]) -> set[str]:
+        wanted = {v for v in video_ids if v}
+        if not wanted:
+            return set()
+        stmt = select(videos.c.video_id).where(videos.c.video_id.in_(wanted))
+        with self._engine.connect() as conn:
+            return {row[0] for row in conn.execute(stmt)}
 
     def delete(self, video_id: str) -> None:
         with self._engine.begin() as conn:

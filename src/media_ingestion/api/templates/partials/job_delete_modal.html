@@ -1,0 +1,44 @@
+{# Modal: deleting a job that still has an ingested video — ask what to remove. #}
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+     onclick="if(event.target===this)this.parentElement.innerHTML=''">
+  <div class="w-full max-w-md rounded-xl bg-white p-5 shadow-xl ring-1 ring-slate-200">
+    <h3 class="text-base font-semibold text-slate-800">Supprimer ce job&nbsp;?</h3>
+    <p class="mt-1 text-sm text-slate-500">
+      Ce job a une vidéo associée dans le catalogue&nbsp;:
+      <span class="font-medium text-slate-700">{{ video.title or video.url or job.url }}</span>.
+      Voulez-vous aussi supprimer la vidéo et son audio&nbsp;?
+    </p>
+
+    <div class="mt-5 flex flex-col gap-2">
+      {# Delete job + its video (audio + catalog row). #}
+      <form hx-post="/ui/jobs/{{ job.id }}/delete" hx-target="#jobs-tbody" hx-swap="innerHTML"
+            hx-on::after-request="document.getElementById('modal').innerHTML=''">
+        <input type="hidden" name="status" value="{{ status or '' }}">
+        <input type="hidden" name="q" value="{{ q or '' }}">
+        {% if selectable %}<input type="hidden" name="selectable" value="1">{% endif %}
+        <input type="hidden" name="delete_video" value="true">
+        <button type="submit"
+                class="w-full rounded-lg bg-rose-600 px-3 py-2 text-sm font-medium text-white hover:bg-rose-700">
+          🗑 Supprimer le job et la vidéo
+        </button>
+      </form>
+
+      {# Delete the job only, keep the video in the catalog. #}
+      <form hx-post="/ui/jobs/{{ job.id }}/delete" hx-target="#jobs-tbody" hx-swap="innerHTML"
+            hx-on::after-request="document.getElementById('modal').innerHTML=''">
+        <input type="hidden" name="status" value="{{ status or '' }}">
+        <input type="hidden" name="q" value="{{ q or '' }}">
+        {% if selectable %}<input type="hidden" name="selectable" value="1">{% endif %}
+        <button type="submit"
+                class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
+          Supprimer le job seulement
+        </button>
+      </form>
+
+      <button type="button" onclick="document.getElementById('modal').innerHTML=''"
+              class="mt-1 w-full rounded-lg px-3 py-2 text-sm font-medium text-slate-500 hover:bg-slate-50">
+        Annuler
+      </button>
+    </div>
+  </div>
+</div>
