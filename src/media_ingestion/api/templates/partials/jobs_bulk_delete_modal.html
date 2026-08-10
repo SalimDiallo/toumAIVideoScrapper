@@ -1,0 +1,46 @@
+{# Modal: bulk-deleting jobs — offer to also drop the videos still in the catalog. #}
+{% set qs = "status=" ~ (status or '') ~ "&q=" ~ (q or '') ~ ("&selectable=1" if selectable else "") %}
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+     onclick="if(event.target===this)this.parentElement.innerHTML=''">
+  <div class="w-full max-w-md rounded-xl bg-white p-5 shadow-xl ring-1 ring-slate-200">
+    <h3 class="text-base font-semibold text-slate-800">Supprimer {{ job_count }} job{{ 's' if job_count > 1 }}&nbsp;?</h3>
+    <p class="mt-1 text-sm text-slate-500">
+      {% if video_count %}
+      {{ video_count }} de ces job{{ 's' if job_count > 1 }} {{ 'ont' if video_count > 1 else 'a' }}
+      une vidéo associée dans le catalogue. Voulez-vous aussi supprimer {{ 'ces vidéos' if video_count > 1 else 'cette vidéo' }} et leur audio&nbsp;?
+      {% else %}
+      Aucune vidéo associée ne sera touchée. Action irréversible.
+      {% endif %}
+    </p>
+
+    <div class="mt-5 flex flex-col gap-2">
+      {% if video_count %}
+      {# Delete jobs + their videos. #}
+      <form hx-post="/ui/jobs/bulk-delete?{{ qs }}" hx-target="#jobs-tbody" hx-swap="innerHTML"
+            hx-on::after-request="document.getElementById('modal').innerHTML=''">
+        {% for id in job_ids %}<input type="hidden" name="job_ids" value="{{ id }}">{% endfor %}
+        <input type="hidden" name="delete_video" value="true">
+        <button type="submit"
+                class="w-full rounded-lg bg-rose-600 px-3 py-2 text-sm font-medium text-white hover:bg-rose-700">
+          🗑 Supprimer les jobs et {{ 'les vidéos' if video_count > 1 else 'la vidéo' }} ({{ video_count }})
+        </button>
+      </form>
+      {% endif %}
+
+      {# Delete the jobs only, keep any associated videos. #}
+      <form hx-post="/ui/jobs/bulk-delete?{{ qs }}" hx-target="#jobs-tbody" hx-swap="innerHTML"
+            hx-on::after-request="document.getElementById('modal').innerHTML=''">
+        {% for id in job_ids %}<input type="hidden" name="job_ids" value="{{ id }}">{% endfor %}
+        <button type="submit"
+                class="w-full rounded-lg {{ 'border border-slate-200 text-slate-700 hover:bg-slate-100' if video_count else 'bg-rose-600 text-white hover:bg-rose-700' }} px-3 py-2 text-sm font-medium">
+          {{ 'Supprimer les jobs seulement' if video_count else 'Supprimer les jobs' }}
+        </button>
+      </form>
+
+      <button type="button" onclick="document.getElementById('modal').innerHTML=''"
+              class="mt-1 w-full rounded-lg px-3 py-2 text-sm font-medium text-slate-500 hover:bg-slate-50">
+        Annuler
+      </button>
+    </div>
+  </div>
+</div>

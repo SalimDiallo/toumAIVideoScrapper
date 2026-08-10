@@ -712,6 +712,50 @@ def test_ui_bulk_delete_jobs():
     assert c in store.jobs  # untouched
 
 
+def test_ui_bulk_delete_jobs_with_videos():
+    storage = FakeStorage(audio_bytes=b"x")
+    catalog = FakeCatalog(
+        rows=[
+            {"video_id": "v1", "url": "http://y/1", "storage_uri": "s3://b/1"},
+            {"video_id": "v2", "url": "http://y/2", "storage_uri": "s3://b/2"},
+        ]
+    )
+    client, store, _ = _client(storage=storage, catalog=catalog)
+    _completed_job(store, job_id="j1", video_id="v1", url="http://y/1")
+    _completed_job(store, job_id="j2", video_id="v2", url="http://y/2")
+
+    r = client.post("/ui/jobs/bulk-delete", data={"job_ids": ["j1", "j2"], "delete_video": "true"})
+    assert r.status_code == 200
+    assert "j1" not in store.jobs and "j2" not in store.jobs
+    assert catalog.get("v1") is None and catalog.get("v2") is None
+    assert sorted(storage.deleted) == ["s3://b/1", "s3://b/2"]
+
+
+def test_ui_bulk_delete_jobs_keeps_videos_by_default():
+    storage = FakeStorage(audio_bytes=b"x")
+    catalog = FakeCatalog(rows=[{"video_id": "v1", "url": "http://y/1", "storage_uri": "s3://b/1"}])
+    client, store, _ = _client(storage=storage, catalog=catalog)
+    _completed_job(store, job_id="j1", video_id="v1", url="http://y/1")
+
+    r = client.post("/ui/jobs/bulk-delete", data={"job_ids": ["j1"]})  # no flag
+    assert r.status_code == 200
+    assert "j1" not in store.jobs
+    assert catalog.get("v1") is not None  # video kept
+    assert storage.deleted == []
+
+
+def test_ui_bulk_delete_dialog_counts_videos():
+    catalog = FakeCatalog(rows=[{"video_id": "v1", "url": "http://y/1"}])  # only v1 survives
+    client, store, _ = _client(catalog=catalog)
+    _completed_job(store, job_id="j1", video_id="v1", url="http://y/1")
+    _completed_job(store, job_id="j2", video_id="v2", url="http://y/2")  # video already gone
+
+    r = client.get("/ui/jobs/bulk-delete-dialog", params={"job_ids": ["j1", "j2"]})
+    assert r.status_code == 200
+    assert "(1)" in r.text  # exactly one surviving video offered
+    assert "Supprimer les jobs seulement" in r.text
+
+
 def test_ui_bulk_delete_videos():
     rows = [
         {"video_id": "v1", "url": "http://y/1", "storage_uri": "s3://b/1"},

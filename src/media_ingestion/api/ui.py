@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
-from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -772,6 +772,33 @@ def mount_ui(
         store.delete(job_id)
         return _jobs_rows(request, status, selectable, q)
 
+    @router.get("/jobs/bulk-delete-dialog", response_class=HTMLResponse)
+    def bulk_delete_jobs_dialog(
+        request: Request,
+        job_ids: list[str] = Query(default=[]),
+        status: str | None = None,
+        selectable: bool = True,
+        q: str | None = None,
+    ) -> HTMLResponse:
+        """Modal for a bulk job delete: how many of the selected jobs still have
+        a video, so we can offer to drop those videos too."""
+        ids = [j for j in job_ids if j]
+        jobs = [j for j in (store.get(i) for i in ids) if j is not None]
+        wanted = {j.video_id for j in jobs if j.video_id and j.status is JobStatus.COMPLETED}
+        video_count = len(get_catalog().existing_video_ids(wanted)) if wanted else 0
+        return templates.TemplateResponse(
+            request,
+            "partials/jobs_bulk_delete_modal.html",
+            {
+                "job_ids": ids,
+                "job_count": len(ids),
+                "video_count": video_count,
+                "status": status,
+                "selectable": selectable,
+                "q": q,
+            },
+        )
+
     @router.post("/jobs/bulk-delete", response_class=HTMLResponse)
     def bulk_delete_jobs(
         request: Request,
@@ -779,10 +806,16 @@ def mount_ui(
         status: str | None = None,
         selectable: bool = True,
         q: str | None = None,
+        delete_video: bool = Form(default=False),
     ) -> HTMLResponse:
         for jid in job_ids:
-            if jid:
-                store.delete(jid)
+            if not jid:
+                continue
+            if delete_video:
+                job = store.get(jid)
+                if job is not None and job.video_id:
+                    _delete_video(job.video_id)  # drop the ingested audio + catalog row too
+            store.delete(jid)
         return _jobs_rows(request, status, selectable, q)
 
     @router.post("/process", response_class=HTMLResponse)

@@ -33,9 +33,8 @@
     <span id="jobselcount" class="text-sm text-slate-500">0 sélectionné(s)</span>
     {% if q %}<span class="text-xs text-slate-400">· recherche « {{ q }} »</span>{% endif %}
     <button id="jobbulkdel" type="button" disabled
-            hx-post="/ui/jobs/bulk-delete?status={{ status or '' }}&q={{ q or '' }}&selectable=1"
-            hx-include=".jobcb:checked" hx-target="#jobs-tbody" hx-swap="innerHTML"
-            hx-confirm="Supprimer les jobs sélectionnés ? Action irréversible."
+            hx-get="/ui/jobs/bulk-delete-dialog?status={{ status or '' }}&q={{ q or '' }}&selectable=1"
+            hx-include=".jobcb:checked" hx-target="#modal" hx-swap="innerHTML"
             class="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-rose-200 px-3 py-1.5 text-sm font-medium text-rose-600 enabled:hover:bg-rose-50 disabled:opacity-40">
       🗑 Supprimer la sélection
     </button>
