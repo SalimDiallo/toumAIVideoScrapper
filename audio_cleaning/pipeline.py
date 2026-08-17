@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,6 +52,12 @@ class CleaningPipeline:
         # Les modèles sont construits une fois et réutilisés sur tout un lot de vidéos.
         self._vad = build_vad(cfg.vad)
         self._classifier = build_classifier(cfg.classification)
+        # Silero (LSTM torch) et YAMNet portent un état interne réinitialisé à chaque
+        # appel : deux ``process`` concurrents sur la MÊME instance (worker multi-thread)
+        # corrompraient mutuellement cet état. On sérialise donc l'inférence. Les étapes
+        # I/O (téléchargement, normalisation ffmpeg, découpe) restent hors du verrou et
+        # continuent de se recouvrir entre threads.
+        self._infer_lock = threading.Lock()
 
     # ------------------------------------------------------------------ public
     def process(
@@ -141,18 +148,22 @@ class CleaningPipeline:
         cfg = self._cfg
         speech: list[Range] = []
         frames: list[FrameScore] = []
-        for offset_s, block in audio_io.iter_chunks(
-            wav,
-            sample_rate=cfg.processing.sample_rate,
-            chunk_duration_s=cfg.processing.chunk_duration_s,
-            overlap_s=cfg.processing.chunk_overlap_s,
-        ):
-            sr = cfg.processing.sample_rate
-            for start, end in self._vad.speech_ranges(block, sr):
-                speech.append((offset_s + start, offset_s + end))
-            # On ne classe que les zones non-parole du bloc (économie de calcul) :
-            # la classification sert uniquement à décider quoi supprimer hors parole.
-            frames.extend(self._classify_nonspeech(block, sr, offset_s))
+        # Verrou tenu pendant toute l'analyse : Silero/YAMNet ne sont pas ré-entrants
+        # (état interne partagé). Deux vidéos analysées en parallèle sur cette instance
+        # attendent donc leur tour ici, mais leurs autres étapes (I/O) restent parallèles.
+        with self._infer_lock:
+            for offset_s, block in audio_io.iter_chunks(
+                wav,
+                sample_rate=cfg.processing.sample_rate,
+                chunk_duration_s=cfg.processing.chunk_duration_s,
+                overlap_s=cfg.processing.chunk_overlap_s,
+            ):
+                sr = cfg.processing.sample_rate
+                for start, end in self._vad.speech_ranges(block, sr):
+                    speech.append((offset_s + start, offset_s + end))
+                # On ne classe que les zones non-parole du bloc (économie de calcul) :
+                # la classification sert uniquement à décider quoi supprimer hors parole.
+                frames.extend(self._classify_nonspeech(block, sr, offset_s))
         # Fusion des recouvrements de blocs.
         return merge_ranges(speech, max_gap=cfg.vad.min_silence_duration), frames
 

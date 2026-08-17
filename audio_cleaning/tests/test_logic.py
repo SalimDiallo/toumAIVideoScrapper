@@ -140,6 +140,34 @@ def test_quality_penalise_une_parole_supprimee():
     assert q["false_speech_deletion_rate"] == 0.5
 
 
+def test_yamnet_projection_equivaut_a_lancienne_agregation():
+    """La projection matricielle doit reproduire l'agrégation par dictionnaire."""
+    import numpy as np
+
+    from audio_cleaning.classifier import _build_projection
+
+    coarse_by_index = ["music", "speech", "music", "noise", "applause", "speech", "other"]
+    labels, proj = _build_projection(coarse_by_index)
+
+    rng = np.random.default_rng(0)
+    scores = rng.random((5, len(coarse_by_index))).astype(np.float32)
+
+    coarse = scores @ proj
+    totals = coarse.sum(axis=1, keepdims=True)
+    coarse = coarse / np.where(totals == 0.0, 1.0, totals)
+
+    for r in range(scores.shape[0]):
+        ref: dict[str, float] = {}
+        for idx, c in enumerate(coarse_by_index):
+            ref[c] = ref.get(c, 0.0) + float(scores[r, idx])
+        total = sum(ref.values()) or 1.0
+        ref = {k: v / total for k, v in ref.items()}
+        got = {labels[j]: float(coarse[r, j]) for j in range(len(labels))}
+        assert set(got) == set(ref)
+        for k in ref:
+            assert abs(ref[k] - got[k]) < 1e-6
+
+
 def test_summarize_removed():
     from audio_cleaning.segments import Segment
 

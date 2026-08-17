@@ -100,6 +100,27 @@ def coarse_of_yamnet(display_name: str) -> str:
     return OTHER
 
 
+def _build_projection(coarse_by_index: list[str]) -> tuple[list[str], np.ndarray]:
+    """Matrice one-hot ``(n_classes_yamnet, n_classes_grossières)`` d'agrégation.
+
+    Permet de projeter les 521 scores YAMNet sur nos classes grossières en un seul
+    produit matriciel ``scores @ projection`` (pour toutes les trames d'un coup), au
+    lieu d'une boucle Python de 521 itérations par trame. Les colonnes suivent l'ordre
+    de première apparition des classes dans ``coarse_by_index`` : même départage des
+    égalités que l'ancienne agrégation par dictionnaire.
+    """
+    labels: list[str] = []
+    col_of: dict[str, int] = {}
+    for coarse in coarse_by_index:
+        if coarse not in col_of:
+            col_of[coarse] = len(labels)
+            labels.append(coarse)
+    proj = np.zeros((len(coarse_by_index), len(labels)), dtype=np.float32)
+    for idx, coarse in enumerate(coarse_by_index):
+        proj[idx, col_of[coarse]] = 1.0
+    return labels, proj
+
+
 class YamnetClassifier:
     """YAMNet via tensorflow-hub, scores agrégés sur nos classes grossières."""
 
@@ -115,40 +136,38 @@ class YamnetClassifier:
         # La liste des 521 classes est fournie par un asset CSV du modèle.
         class_map_path = self._model.class_map_path().numpy().decode("utf-8")
         with open(class_map_path, newline="") as f:
-            self._coarse_by_index = [
-                coarse_of_yamnet(row["display_name"]) for row in csv.DictReader(f)
-            ]
+            coarse_by_index = [coarse_of_yamnet(row["display_name"]) for row in csv.DictReader(f)]
+        # Précalcul de la matrice d'agrégation 521 -> classes grossières (une fois).
+        self._coarse_labels, self._projection = _build_projection(coarse_by_index)
 
     def classify(self, samples: np.ndarray, sr: int, offset_s: float) -> list[FrameScore]:
         # YAMNet attend du 16 kHz mono float32. Il segmente en trames de 0.96 s
         # (hop 0.48 s) et renvoie un score par trame et par classe.
         scores, _embeddings, _spectro = self._model(samples.astype(np.float32))
-        scores = np.asarray(scores)  # (n_frames, 521)
+        scores = np.asarray(scores, dtype=np.float32)  # (n_frames, 521)
+        # Agrégation vectorisée : un seul produit matriciel pour toutes les trames,
+        # puis normalisation par ligne (somme des scores grossiers = somme des 521).
+        coarse = scores @ self._projection  # (n_frames, n_classes_grossières)
+        totals = coarse.sum(axis=1, keepdims=True)
+        coarse = coarse / np.where(totals == 0.0, 1.0, totals)
+
+        labels = self._coarse_labels
+        best = coarse.argmax(axis=1)
         hop = 0.48
         out: list[FrameScore] = []
-        for i, frame_scores in enumerate(scores):
-            coarse = _aggregate_coarse(frame_scores, self._coarse_by_index)
-            label = max(coarse, key=coarse.get)
+        for i in range(coarse.shape[0]):
+            row = coarse[i]
+            start = offset_s + i * hop
             out.append(
                 FrameScore(
-                    start=offset_s + i * hop,
-                    end=offset_s + i * hop + 0.96,
-                    label=label,
-                    confidence=float(coarse[label]),
-                    scores=coarse,
+                    start=start,
+                    end=start + 0.96,
+                    label=labels[best[i]],
+                    confidence=float(row[best[i]]),
+                    scores={lab: float(row[j]) for j, lab in enumerate(labels)},
                 )
             )
         return out
-
-
-def _aggregate_coarse(frame_scores: np.ndarray, coarse_by_index: list[str]) -> dict[str, float]:
-    """Somme les probabilités YAMNet par classe grossière (max-normalisée)."""
-    agg: dict[str, float] = {}
-    for idx, score in enumerate(frame_scores):
-        c = coarse_by_index[idx]
-        agg[c] = agg.get(c, 0.0) + float(score)
-    total = sum(agg.values()) or 1.0
-    return {k: v / total for k, v in agg.items()}
 
 
 class PannsClassifier:
