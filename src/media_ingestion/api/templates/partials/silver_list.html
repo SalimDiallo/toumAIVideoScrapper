@@ -1,0 +1,96 @@
+{% if not listing.available %}
+<p class="text-sm text-slate-500">
+  Liste indisponible.
+  {% if listing.error %}<span class="text-rose-600">({{ listing.error }})</span>{% else %}Nécessite un stockage MinIO configuré.{% endif %}
+</p>
+{% else %}
+
+{% macro row(item, done) %}
+<tr class="border-b border-slate-100 hover:bg-slate-50/70">
+  {% if done %}
+  <td class="px-3 py-2.5"><input type="checkbox" name="video_ids" value="{{ item.language }}/{{ item.video_id }}" class="silvercb h-4 w-4 rounded border-slate-300"></td>
+  {% endif %}
+  <td class="px-4 py-2.5">
+    {% if item.in_catalog %}
+    <a href="/ui/videos/{{ item.video_id }}{% if done %}?layer=silver{% endif %}"
+       class="block max-w-[22rem] truncate font-medium text-slate-800 hover:text-indigo-600" title="{{ item.title }}">{{ item.title }}</a>
+    {% else %}
+    <span class="block max-w-[22rem] truncate font-medium text-slate-700" title="{{ item.title }}">{{ item.title }}</span>
+    {% endif %}
+    <span class="font-mono text-xs text-slate-400">{{ item.video_id }}{% if item.channel %} · {{ item.channel }}{% endif %}</span>
+  </td>
+  <td class="px-4 py-2.5"><span class="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">{{ item.language }}</span></td>
+  <td class="px-4 py-2.5 text-right whitespace-nowrap">
+    {% if item.in_catalog %}
+      {% if done %}
+      <a href="/ui/videos/{{ item.video_id }}?layer=silver"
+         class="rounded-md border border-emerald-200 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50">✨ Écouter</a>
+      {% else %}
+      <a href="/ui/videos/{{ item.video_id }}"
+         class="rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50">▶ Voir le brut</a>
+      {% endif %}
+    {% else %}
+    <span class="text-xs text-slate-400">hors catalogue</span>
+    {% endif %}
+  </td>
+</tr>
+{% endmacro %}
+
+<div class="grid gap-4 lg:grid-cols-2">
+  <!-- Traitées (silver) : sélection + téléchargement ZIP -->
+  <form id="silverzip" method="post" action="/ui/silver/zip"
+        class="overflow-hidden rounded-xl border border-slate-200 bg-white">
+    <div class="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3">
+      <span class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">✨</span>
+      <h3 class="font-semibold text-slate-800">Traitées</h3>
+      <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">{{ listing.done_count }}</span>
+      <div class="ml-auto flex items-center gap-2">
+        <span id="silver-selcount" class="text-xs text-slate-500">0 sélectionnée(s)</span>
+        <button id="silver-dlsel" type="submit" disabled
+                class="inline-flex items-center gap-1.5 rounded-lg bg-[#018B96] px-3 py-1.5 text-xs font-medium text-white enabled:hover:bg-slate-700 disabled:opacity-40">
+          ⬇ Sélection
+        </button>
+        <button type="submit" name="scope" value="all" {% if not listing.done %}disabled{% endif %}
+                class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 enabled:hover:bg-slate-100 disabled:opacity-40">
+          ⬇ Tout le nettoyé
+        </button>
+      </div>
+    </div>
+    <div class="max-h-[28rem] overflow-y-auto">
+      <table class="w-full text-sm">
+        {% if listing.done %}
+        <thead class="text-left text-xs uppercase tracking-wide text-slate-400">
+          <tr class="border-b border-slate-100">
+            <th class="px-3 py-2"><input id="silver-selectall" type="checkbox" class="h-4 w-4 rounded border-slate-300"></th>
+            <th class="px-4 py-2 font-medium">Vidéo</th><th class="px-4 py-2 font-medium">Langue</th><th class="px-4 py-2"></th>
+          </tr>
+        </thead>
+        {% endif %}
+        <tbody>
+          {% for item in listing.done %}{{ row(item, true) }}{% else %}
+          <tr><td class="px-4 py-10 text-center text-sm text-slate-400">Aucune vidéo nettoyée pour l'instant.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </form>
+
+  <!-- En attente (bronze non traité) -->
+  <div class="overflow-hidden rounded-xl border border-slate-200 bg-white">
+    <div class="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+      <span class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-amber-50 text-amber-600">⏳</span>
+      <h3 class="font-semibold text-slate-800">En attente</h3>
+      <span class="ml-auto rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">{{ listing.pending_count }}</span>
+    </div>
+    <div class="max-h-[28rem] overflow-y-auto">
+      <table class="w-full text-sm">
+        <tbody>
+          {% for item in listing.pending %}{{ row(item, false) }}{% else %}
+          <tr><td class="px-4 py-10 text-center text-sm text-slate-400">Tout est nettoyé 🎉</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}

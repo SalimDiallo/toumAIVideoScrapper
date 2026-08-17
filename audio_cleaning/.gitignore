@@ -1,0 +1,5 @@
+# Sorties générées par le pipeline (audio nettoyé, métriques, visualisations…)
+outputs/
+demo/
+bench_*/
+*.evaluation.json

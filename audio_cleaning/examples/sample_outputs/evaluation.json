@@ -1,0 +1,90 @@
+{
+  "num_annotated_segments": 5,
+  "confusion_matrix": {
+    "labels": [
+      "speech",
+      "music",
+      "applause",
+      "laughter",
+      "noise",
+      "silence",
+      "other"
+    ],
+    "matrix": [
+      [
+        22.03,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        5.98,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        4.99,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    ]
+  },
+  "quality": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1_score": 1.0,
+    "speech_retention": 1.0,
+    "false_speech_deletion_rate": 0.0,
+    "music_removal_rate": 1.0,
+    "applause_removal_rate": 1.0,
+    "noise_removal_rate": 0.0,
+    "support_speech_s": 22.03
+  }
+}

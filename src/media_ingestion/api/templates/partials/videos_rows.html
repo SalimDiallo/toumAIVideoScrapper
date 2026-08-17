@@ -4,6 +4,10 @@
   <td class="px-4 py-3">
     <a href="/ui/videos/{{ v.video_id }}" class="max-w-[22rem] truncate font-medium text-slate-800 hover:text-indigo-600 block" title="{{ v.title or v.url }}">{{ v.title or v.url }}</a>
     <span class="font-mono text-xs text-slate-400">{{ v.video_id }}</span>
+    {% if (v.language, v.video_id) in (silver_ids or []) %}
+    <a href="/ui/videos/{{ v.video_id }}?layer=silver" title="Version nettoyée disponible"
+       class="ml-1 rounded bg-emerald-50 px-1.5 py-0.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100">✨ silver</a>
+    {% endif %}
   </td>
   <td class="px-4 py-3">
     {% if v.provider %}<span class="rounded bg-indigo-50 px-1.5 py-0.5 text-xs font-medium text-indigo-700 capitalize ring-1 ring-inset ring-indigo-600/20">{{ v.provider }}</span>

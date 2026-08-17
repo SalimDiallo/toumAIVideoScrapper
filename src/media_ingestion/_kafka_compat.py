@@ -27,7 +27,7 @@ def apply() -> None:
     def unregister(self, fileobj, _original=original):  # type: ignore[no-untyped-def]
         try:
             return _original(self, fileobj)
-        except ValueError, OSError:
+        except (ValueError, OSError):
             # Socket déjà fermée (fileno() == -1) : retrouve la clé par identité
             # et retire-la via son fd d'origine.
             for fd, key in list(self._fd_to_key.items()):

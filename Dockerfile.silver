@@ -1,0 +1,48 @@
+# Image dédiée à la couche SILVER (nettoyage audio bronze -> silver).
+#
+# Séparée de l'image applicative (toumai-app) parce que les extras tirent
+# demucs + PyTorch + TensorFlow (plusieurs Go) : on ne veut pas alourdir l'API/le
+# worker avec ça. Cette image embarque ffmpeg ET les modèles de nettoyage, et lance
+# la CLI `toumai-silver`.
+#
+# Base Python 3.12 (et non 3.14) : c'est le moteur "vad" par défaut qui pilote, et
+# son classifieur YAMNet dépend de TensorFlow, lequel n'a PAS de wheel Python 3.14.
+# torch (demucs + Silero VAD) et TensorFlow (YAMNet) ont tous deux des wheels 3.12.
+# Pour forcer une autre base :
+#   docker build -f Dockerfile.silver --build-arg PY_IMAGE=python:3.11-slim -t toumai-silver .
+
+ARG PY_IMAGE=python:3.12-slim
+
+# ---------- build ----------
+FROM ${PY_IMAGE} AS build
+WORKDIR /app
+ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+# métadonnées + code (hatchling a besoin des packages pour builder)
+COPY pyproject.toml README.md ./
+COPY src ./src
+COPY audio_cleaning ./audio_cleaning
+# extras : silver (demucs+torch), cleaning (moteur vad : soundfile, Silero via torch.hub),
+# cleaning-yamnet (TensorFlow + YAMNet). Installation longue/volumineuse (plusieurs Go).
+RUN pip install ".[silver,cleaning,cleaning-yamnet]"
+
+# ---------- runtime ----------
+FROM ${PY_IMAGE} AS runtime
+# ffmpeg = détection/découpe des silences + concat ; tini = init PID 1 propre
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg tini \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=build /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH" PYTHONUNBUFFERED=1
+# utilisateur non-root + cache torch/demucs dans son home (montable en volume pour
+# ne pas re-télécharger le modèle htdemucs à chaque exécution)
+RUN useradd -m -u 1000 toumai
+USER toumai
+WORKDIR /home/toumai/app
+ENV TOUMAI_DATA_DIR=/data \
+    TORCH_HOME=/home/toumai/.cache/torch \
+    XDG_CACHE_HOME=/home/toumai/.cache
+# `toumai-silver` dans l'entrypoint -> les arguments passés à `docker compose run`
+# (ex. --force, --no-music-removal) sont transmis directement à la CLI.
+ENTRYPOINT ["tini", "--", "toumai-silver"]

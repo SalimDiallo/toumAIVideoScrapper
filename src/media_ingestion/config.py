@@ -76,6 +76,77 @@ class Settings(BaseSettings):
     # conteneur). La valeur par défaut de MinIO est "us-east-1".
     minio_region: str = "us-east-1"
 
+    # --- Couche SILVER (nettoyage audio : bronze -> silver) ---
+    # Buckets bronze/silver de l'architecture medallion. Par défaut on réutilise
+    # `minio_bucket` (bucket unique, préfixes `bronze/` et `silver/`) ; renseigner
+    # ces deux clés pour éclater bronze et silver sur des buckets distincts.
+    minio_bucket_bronze: str | None = None
+    minio_bucket_silver: str | None = None
+    # Enchaîner automatiquement le nettoyage silver dès qu'un job d'ingestion est
+    # terminé (best-effort : un échec silver ne remet pas le job en erreur). Nécessite
+    # storage_backend=minio. Le worker n'ayant pas forcément demucs, ce nettoyage
+    # auto retombe sur ffmpeg seul (découpe des silences) — voir [[Dockerfile.silver]].
+    silver_auto_process: bool = True
+    # Suppression de la musique de fond via demucs (--two-stems vocals). Coûteux en
+    # CPU/GPU ; le désactiver garde l'audio d'origine avant la découpe des silences.
+    silver_remove_music: bool = True
+    # Couper les passages non-parlés annotés dans le transcript (applaudissements,
+    # musique seule, rires : [Applause], [Musique], ♪...) et les retirer du transcript.
+    silver_remove_nonspeech: bool = True
+    # Mots-clés (insensibles à la casse) qui, dans un cue entre [] ou (), marquent un
+    # passage non-parlé à couper. Éditable depuis l'UI pour ajouter/retirer des cas.
+    # Les notes de musique (♪) sont toujours détectées, indépendamment de cette liste.
+    silver_nonspeech_keywords: list[str] = Field(
+        default_factory=lambda: [
+            "applause",
+            "applaudiss",
+            "music",
+            "musique",
+            "musik",
+            "laughter",
+            "laughs",
+            "laughing",
+            "rire",
+            "cheer",
+            "cheering",
+            "clapping",
+            "chant",
+            "singing",
+            "instrumental",
+            "inaudible",
+            "whistling",
+            "sifflement",
+            "brouhaha",
+            "background noise",
+        ]
+    )
+    # --- Moteur de nettoyage silver ---
+    # "vad" : nouveau pipeline VAD (Silero) + classification d'évènements (YAMNet),
+    # voir le package `audio_cleaning`. "ffmpeg" : ancien moteur (demucs + silencedetect).
+    # Le moteur "vad" retombe automatiquement sur "ffmpeg" si ses dépendances
+    # (soundfile, pyyaml, torch...) ne sont pas installées — comme l'image worker légère.
+    silver_engine: Literal["vad", "ffmpeg"] = "vad"
+    # Backend VAD du moteur "vad" : "silero" (torch, précis) ou "energy" (repli léger).
+    silver_vad_backend: str = "silero"
+    # Backend de classification d'évènements : "yamnet" (TensorFlow, le plus précis),
+    # "panns" (torch, checkpoint ~300 Mo) ou "heuristic" (aucune dep). Repli auto vers
+    # "heuristic" si le backend demandé est indisponible (ex. pas de TensorFlow en 3.14).
+    silver_classifier_backend: str = "yamnet"
+    # Seuil de parole du VAD (proba au-dessus de laquelle = parole) et seuil de
+    # confiance pour supprimer un évènement non-parlé (musique/applaudissements/bruit).
+    silver_vad_threshold: float = 0.5
+    silver_event_threshold: float = 0.7
+    # Modèle demucs utilisé pour isoler la voix (htdemucs = défaut, bon compromis).
+    # Utilisé uniquement par le moteur "ffmpeg".
+    silver_demucs_model: str = "htdemucs"
+    # Détection des silences (ffmpeg silencedetect). Seuil en dB sous lequel l'audio
+    # est considéré silencieux, et durée minimale d'un silence pour être coupé.
+    silver_silence_threshold_db: float = -35.0
+    silver_min_silence_s: float = 0.5
+    # Marge (secondes) conservée de chaque côté d'un segment gardé pour ne pas
+    # tronquer le début/fin des mots au moment des coupes.
+    silver_padding_s: float = 0.1
+
     # metadata catalog
     metadata_backend: Literal["none", "postgres"] = "none"
     postgres_dsn: str = "postgresql+psycopg://toumai:toumai@localhost:5432/toumai"

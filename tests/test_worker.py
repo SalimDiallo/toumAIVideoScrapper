@@ -43,6 +43,7 @@ def _result() -> IngestionResult:
         audio=AudioAsset(path=Path("a.wav"), format="wav"),
         transcript=None,
         transcript_status=TranscriptStatus.UNAVAILABLE,
+        language="fr",
         storage_uri="s3://bucket/bronze/fr/vid1",
     )
 
@@ -50,6 +51,20 @@ def _result() -> IngestionResult:
 class OkUseCase:
     def execute(self, url, work_dir, languages):
         return _result()
+
+
+class FakeSilver:
+    def __init__(self):
+        self.calls: list = []
+
+    def process_video(self, language, video_id, *, force=False):
+        self.calls.append((language, video_id))
+        return True
+
+
+class FailingSilver:
+    def process_video(self, language, video_id, *, force=False):
+        raise RuntimeError("silver boom")
 
 
 class BoomUseCase:
@@ -81,3 +96,23 @@ def test_failure_marks_failed_and_dlq():
     assert last[1] == JobStatus.FAILED
     assert last[3] == "download failed"  # error
     assert "job.dlq" in [e[0] for e in pub.events]
+
+
+def test_completed_job_triggers_auto_silver():
+    handler, store, _ = _handler(OkUseCase())
+    silver = FakeSilver()
+    handler.silver_pipeline = silver
+    handler.handle({"job_id": "j3", "url": "http://yt/x", "languages": ["fr"]})
+
+    # Le nettoyage silver est enchaîné pour la vidéo tout juste ingérée.
+    assert silver.calls == [("fr", "vid1")]
+    assert store.updates[-1][1] == JobStatus.COMPLETED
+
+
+def test_auto_silver_failure_does_not_fail_the_job():
+    handler, store, _ = _handler(OkUseCase())
+    handler.silver_pipeline = FailingSilver()
+    handler.handle({"job_id": "j4", "url": "http://yt/x", "languages": ["fr"]})
+
+    # Un échec du nettoyage (best-effort) laisse le job terminé, pas en échec.
+    assert store.updates[-1][1] == JobStatus.COMPLETED

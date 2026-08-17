@@ -327,3 +327,19 @@ black --check src tests
 | [`docs/PHASE2_INFRA.md`](docs/PHASE2_INFRA.md) | MinIO / Postgres / stockage medallion |
 | [`docs/PHASE2_API_KAFKA.md`](docs/PHASE2_API_KAFKA.md) | API FastAPI + événements Kafka + worker |
 | [`docs/YTDLP_LIMITES.md`](docs/YTDLP_LIMITES.md) | limites/pièges yt-dlp |
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

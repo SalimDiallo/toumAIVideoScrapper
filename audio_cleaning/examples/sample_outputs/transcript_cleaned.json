@@ -1,0 +1,17 @@
+[
+  {
+    "start_s": 0.0,
+    "duration_s": 8.0,
+    "text": "Bonjour et bienvenue dans cette conférence."
+  },
+  {
+    "start_s": 8.52,
+    "duration_s": 8.0,
+    "text": "Nous allons parler du nettoyage audio automatique."
+  },
+  {
+    "start_s": 17.03,
+    "duration_s": 5.0,
+    "text": "Merci de votre attention et à bientôt."
+  }
+]

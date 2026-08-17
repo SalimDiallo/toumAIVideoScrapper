@@ -1,0 +1,54 @@
+# Configuration du pipeline de nettoyage audio/transcript.
+# AUCUN paramètre important n'est codé en dur : tout se règle ici.
+# Surcharge possible en CLI (--set vad.threshold=0.6) — voir cli.py.
+
+audio:
+  # Normalisation en amont (ffmpeg). L'audio est toujours ramené en mono au
+  # sample_rate ci-dessous. loudnorm = normalisation de loudness EBU R128
+  # (utile pour homogénéiser un grand volume de vidéos hétérogènes).
+  loudnorm: true
+  # ffmpeg / ffprobe : dossier des binaires. null = on suppose le PATH.
+  ffmpeg_dir: null
+
+processing:
+  sample_rate: 16000          # 16 kHz : attendu par Silero VAD et YAMNet
+  # Traitement par blocs pour ne pas charger des heures d'audio en RAM.
+  chunk_duration_s: 300.0     # 5 min par bloc
+  chunk_overlap_s: 1.0        # recouvrement pour ne pas couper un mot au bord
+  min_remove_duration: 0.5    # ne jamais retirer une zone plus courte (anti micro-coupe)
+
+vad:
+  backend: silero             # silero | energy (repli léger sans torch)
+  onnx: true                  # Silero en ONNX Runtime (plus léger/rapide sur CPU)
+  threshold: 0.5              # proba de parole au-dessus de laquelle = speech
+  min_speech_duration: 0.3    # fusionne/ignore les bribes de parole plus courtes
+  min_silence_duration: 0.3   # silence mini pour séparer deux zones de parole
+  speech_padding_before: 0.2  # marge de sécurité AVANT chaque zone de parole (s)
+  speech_padding_after: 0.3   # marge de sécurité APRES chaque zone de parole (s)
+
+classification:
+  backend: yamnet             # yamnet | heuristic (repli léger sans tensorflow)
+  frame_duration_s: 0.96      # fenêtre native YAMNet
+  frame_hop_s: 0.48           # pas entre fenêtres
+  # Seuils de confiance : au-dessus -> on autorise la suppression de la classe.
+  music_threshold: 0.7
+  applause_threshold: 0.7
+  laughter_threshold: 0.7
+  noise_threshold: 0.7
+
+decision:
+  # Quelles classes non-speech sont supprimées (si confiance >= seuil).
+  remove_music: true
+  remove_applause: true
+  remove_noise: true
+  remove_silence: true
+  remove_laughter: false      # les rires ponctuent souvent la parole : off par défaut
+  remove_other: false         # classe fourre-tout : on conserve par prudence
+  # Filet de sécurité global : sous cette confiance, on CONSERVE quoi qu'il arrive.
+  keep_if_confidence_below: 0.5
+
+output:
+  root: outputs               # dossier racine des sorties (un sous-dossier par vidéo)
+  save_original_wav: true
+  save_visualization: true
+  audio_format: wav

@@ -7,7 +7,9 @@ name = "media-ingestion-platform"
 version = "0.1.0"
 description = "TOUMAI media ingestion — YouTube audio + transcript scraper (MVP, ports/adapters)"
 readme = "README.md"
-requires-python = ">=3.14"
+# Plancher à 3.12 : l'app tourne en 3.14, mais l'image silver (moteur vad + YAMNet)
+# est en 3.12 car TensorFlow n'a pas de wheel 3.14. Le code reste compatible 3.12+.
+requires-python = ">=3.12"
 dependencies = [
     # [default] tire les extras utiles à certains extracteurs (websockets,
     # pycryptodomex, mutagen...). Les plateformes qui bougent vite (TikTok) exigent
@@ -25,19 +27,47 @@ dependencies = [
     "python-multipart>=0.0.9",
     "jinja2>=3.1",
     "kafka-python-ng>=2.2",
+    # Couche silver : demucs isole la voix (retrait musique). Il tire torch, mais
+    # numpy doit être épinglé explicitement (non tiré sous Python 3.14 -> demucs
+    # planterait "No module named 'numpy'"). ffmpeg/ffprobe = deps système.
+    "demucs>=4.0.1",
+    "numpy>=1.26",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.4", "black>=24.0", "mypy>=1.9", "httpx>=0.27"]
+# Conservé pour compat : demucs est désormais une dépendance principale.
+silver = ["demucs>=4.0", "numpy>=1.26"]
+# Moteur de nettoyage "vad" (package audio_cleaning). torch est déjà tiré par demucs ;
+# Silero est chargé via torch.hub (pas besoin de silero-vad/torchaudio). Ces deps ont
+# des wheels sur Python 3.14, contrairement à TensorFlow ci-dessous.
+cleaning = [
+    "soundfile>=0.12",
+    "pyyaml>=6.0",
+    "matplotlib>=3.7",
+    "psutil>=5.9",
+]
+# Classifieur d'évènements YAMNet : TensorFlow n'a PAS de wheel Python 3.14. Le
+# marqueur `python_version < "3.14"` garde le lock résoluble sous 3.14 (TensorFlow
+# est alors simplement ignoré) tout en l'installant dans l'image silver 3.12 (voir
+# Dockerfile.silver). Sans lui, le moteur vad retombe sur le classifieur heuristique.
+cleaning-yamnet = [
+    "tensorflow>=2.13; python_version < '3.14'",
+    "tensorflow-hub>=0.14; python_version < '3.14'",
+    # tensorflow-hub importe encore pkg_resources ; setuptools>=81 l'a supprimé.
+    "setuptools<81; python_version < '3.14'",
+    "scikit-learn>=1.3",
+]
 
 [project.scripts]
 toumai-ingest = "media_ingestion.cli:main"
 toumai-api = "media_ingestion.api.app:main"
 toumai-worker = "media_ingestion.worker.consumer:main"
 toumai-veille = "media_ingestion.veille.cli:main"
+toumai-silver = "media_ingestion.silver.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/media_ingestion"]
+packages = ["src/media_ingestion", "audio_cleaning"]
 
 [tool.ruff]
 target-version = "py314"
@@ -53,5 +83,5 @@ strict = true
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
-testpaths = ["tests"]
+pythonpath = ["src", "."]
+testpaths = ["tests", "audio_cleaning/tests"]

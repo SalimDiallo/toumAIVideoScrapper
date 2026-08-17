@@ -1,0 +1,42 @@
+[
+  {
+    "start": 0.0,
+    "end": 8.31,
+    "label": "speech",
+    "action": "keep",
+    "confidence": 1.0,
+    "source": "vad"
+  },
+  {
+    "start": 8.31,
+    "end": 14.29,
+    "label": "music",
+    "action": "remove",
+    "confidence": 0.7178,
+    "source": "classifier"
+  },
+  {
+    "start": 14.29,
+    "end": 22.8,
+    "label": "speech",
+    "action": "keep",
+    "confidence": 1.0,
+    "source": "vad"
+  },
+  {
+    "start": 22.8,
+    "end": 27.79,
+    "label": "noise",
+    "action": "remove",
+    "confidence": 0.9088,
+    "source": "classifier"
+  },
+  {
+    "start": 27.79,
+    "end": 33.0,
+    "label": "speech",
+    "action": "keep",
+    "confidence": 1.0,
+    "source": "vad"
+  }
+]

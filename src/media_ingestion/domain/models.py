@@ -28,19 +28,6 @@ class TranscriptSource(str, Enum):
     PROVIDER_SUBTITLE = "provider_subtitle"  # author-provided subtitles (non-YouTube, via yt-dlp)
     PROVIDER_ASR = "provider_asr"  # auto-generated captions (non-YouTube, via yt-dlp)
 
-    @property
-    def is_youtube(self) -> bool:
-        return self in {
-            TranscriptSource.YOUTUBE_MANUAL,
-            TranscriptSource.YOUTUBE_ASR,
-            TranscriptSource.YOUTUBE_TRANSLATED,
-        }
-
-    @property
-    def is_human(self) -> bool:
-        """True for author-written captions (highest confidence)."""
-        return self in {TranscriptSource.YOUTUBE_MANUAL, TranscriptSource.PROVIDER_SUBTITLE}
-
 
 class TranscriptStatus(str, Enum):
     AVAILABLE = "available"

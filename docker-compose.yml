@@ -121,6 +121,32 @@ services:
       - toumai-data:/data
     restart: unless-stopped
 
+  # ------------------------------------------------------------------- Silver
+  # Nettoyage audio bronze -> silver (demucs + ffmpeg). Image lourde (PyTorch),
+  # distincte de toumai-app -> derrière le profil "silver" pour NE PAS démarrer
+  # avec la stack normale. Exécution à la demande (one-shot, la CLI se termine) :
+  #   docker compose --profile silver run --rm toumai-silver
+  #   docker compose --profile silver run --rm toumai-silver --force
+  #   docker compose --profile silver run --rm toumai-silver --no-music-removal
+  # Les arguments après le nom du service sont transmis à la CLI toumai-silver.
+  toumai-silver:
+    build:
+      context: .
+      dockerfile: Dockerfile.silver
+    image: toumai-silver
+    profiles: ["silver"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      TOUMAI_STORAGE_BACKEND: minio
+      TOUMAI_MINIO_ENDPOINT: minio:9000
+    volumes:
+      # cache des modèles demucs/torch : évite de re-télécharger htdemucs à chaque run
+      - silver-cache:/home/toumai/.cache
+    restart: "no"
+
   # ------------------------------------------------------------------ Airflow
   # Ordonnanceur du job quotidien de veille. Empreinte minimale : LocalExecutor
   # (pas de Celery/Redis), metadata DB dédiée `airflow` sur le Postgres existant.
@@ -202,3 +228,4 @@ volumes:
   pgdata:
   miniodata:
   toumai-data:
+  silver-cache:

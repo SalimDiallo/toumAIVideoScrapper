@@ -1,0 +1,26 @@
+{
+  "vad": {
+    "speech_duration_s": 21.03,
+    "non_speech_duration_s": 11.97,
+    "speech_ratio": 0.6373,
+    "num_speech_segments": 3,
+    "avg_speech_segment_s": 7.01
+  },
+  "cleaning": {
+    "original_duration_s": 33.0,
+    "cleaned_duration_s": 22.03,
+    "removed_duration_s": 10.97,
+    "cleaning_ratio": 0.3324,
+    "music_removed_duration_s": 5.98,
+    "applause_removed_duration_s": 0.0,
+    "noise_removed_duration_s": 4.99,
+    "silence_removed_duration_s": 0.0
+  },
+  "performance": {
+    "processing_time_s": 0.146,
+    "audio_duration_s": 33.0,
+    "rtf": 0.0044
+  },
+  "segments_total": 5,
+  "segments_removed": 2
+}

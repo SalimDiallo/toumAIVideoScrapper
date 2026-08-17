@@ -1,0 +1,29 @@
+# Dépendances du pipeline audio_cleaning.
+# Recommandé : un venv Python 3.11 (torch/tensorflow sont plus stables qu'en 3.14).
+#
+# Noyau (toujours nécessaire) :
+numpy>=1.24
+pyyaml>=6.0
+soundfile>=0.12
+librosa>=0.10
+matplotlib>=3.7
+pandas>=2.0
+
+# VAD Silero (choisir UNE voie) :
+#   - torch  : modèle chargé via torch.hub
+#   - onnx   : plus léger sur CPU (vad.onnx: true)
+torch>=2.1              # requis pour le backend silero (mode torch)
+onnxruntime>=1.16       # requis pour vad.onnx: true
+silero-vad>=5.1         # helpers officiels (get_speech_timestamps, load_silero_vad)
+
+# Classification d'évènements YAMNet :
+tensorflow>=2.13        # YAMNet via tensorflow-hub
+tensorflow-hub>=0.14
+#   Alternative plus légère sans TensorFlow : panns-inference (PyTorch, CNN14).
+#   pip install panns-inference   (puis classification.backend: panns — voir README)
+
+# Métriques de performance (optionnel mais recommandé) :
+psutil>=5.9
+
+# Métriques qualité (matrice de confusion, precision/recall/F1) :
+scikit-learn>=1.3

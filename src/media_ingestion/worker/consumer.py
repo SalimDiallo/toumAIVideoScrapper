@@ -36,6 +36,23 @@ def _safe_handle(handler: JobHandler, event: dict) -> None:
         log.error("worker.handle_error", error=str(exc))
 
 
+def _build_silver_pipeline(settings: Settings):
+    """Pipeline silver pour l'enchaînement auto, ou None si désactivé/non applicable.
+
+    Ne s'active que sur stockage MinIO (le silver lit/écrit sur MinIO) et si
+    ``silver_auto_process`` est vrai.
+    """
+    if not settings.silver_auto_process or settings.storage_backend != "minio":
+        return None
+    try:
+        from ..bootstrap import build_silver_pipeline
+
+        return build_silver_pipeline(settings)
+    except Exception as exc:  # noqa: BLE001 - MinIO injoignable au démarrage
+        log.warning("worker.silver_disabled", error=str(exc))
+        return None
+
+
 def main() -> None:
     configure_logging()
     settings = Settings()
@@ -45,6 +62,7 @@ def main() -> None:
         job_store=build_job_store(settings),
         publisher=build_publisher(settings),
         settings=settings,
+        silver_pipeline=_build_silver_pipeline(settings),
     )
 
     # Plafond de téléchargements simultanés sur ce serveur : on lit au plus N
@@ -85,6 +103,7 @@ def main() -> None:
                     env_mtime = current
                     reload_into(settings, _env_path())
                     handler.use_case = build_use_case(settings)
+                    handler.silver_pipeline = _build_silver_pipeline(settings)
                     log.info("worker.config_reloaded")
 
                 batch = consumer.poll(timeout_ms=1000)

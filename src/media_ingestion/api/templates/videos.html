@@ -7,28 +7,36 @@
 {% set kl = ('&language=' ~ language) if language else '' %}
 {% set kp = ('&provider=' ~ provider) if provider else '' %}
 {% set kq = ('&q=' ~ q) if q else '' %}
+{% set ks = ('&silver=' ~ silver) if silver else '' %}
 
 <div class="flex flex-wrap items-center gap-2">
   <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Langue</span>
-  <a href="/ui/videos?_=1{{ kt }}{{ kp }}{{ kq }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if not language %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Toutes</a>
+  <a href="/ui/videos?_=1{{ kt }}{{ kp }}{{ kq }}{{ ks }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if not language %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Toutes</a>
   {% for l in languages %}
-  <a href="/ui/videos?language={{ l }}{{ kt }}{{ kp }}{{ kq }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if language == l %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">{{ l }}</a>
+  <a href="/ui/videos?language={{ l }}{{ kt }}{{ kp }}{{ kq }}{{ ks }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if language == l %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">{{ l }}</a>
   {% endfor %}
 </div>
 
 <div class="mt-2 flex flex-wrap items-center gap-2">
   <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Transcript</span>
-  <a href="/ui/videos?_=1{{ kl }}{{ kp }}{{ kq }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if not transcript %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Tous</a>
-  <a href="/ui/videos?transcript=available{{ kl }}{{ kp }}{{ kq }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if transcript == 'available' %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Disponible</a>
-  <a href="/ui/videos?transcript=unavailable{{ kl }}{{ kp }}{{ kq }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if transcript == 'unavailable' %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Indisponible</a>
+  <a href="/ui/videos?_=1{{ kl }}{{ kp }}{{ kq }}{{ ks }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if not transcript %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Tous</a>
+  <a href="/ui/videos?transcript=available{{ kl }}{{ kp }}{{ kq }}{{ ks }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if transcript == 'available' %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Disponible</a>
+  <a href="/ui/videos?transcript=unavailable{{ kl }}{{ kp }}{{ kq }}{{ ks }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if transcript == 'unavailable' %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Indisponible</a>
+</div>
+
+<div class="mt-2 flex flex-wrap items-center gap-2">
+  <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Nettoyage</span>
+  <a href="/ui/videos?_=1{{ kl }}{{ kt }}{{ kp }}{{ kq }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if not silver %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Toutes</a>
+  <a href="/ui/videos?silver=done{{ kl }}{{ kt }}{{ kp }}{{ kq }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if silver == 'done' %}bg-emerald-600 text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">✨ Nettoyées</a>
+  <a href="/ui/videos?silver=pending{{ kl }}{{ kt }}{{ kp }}{{ kq }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if silver == 'pending' %}bg-amber-500 text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">⏳ Non nettoyées</a>
 </div>
 
 {% if providers %}
 <div class="mt-2 flex flex-wrap items-center gap-2">
   <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Plateforme</span>
-  <a href="/ui/videos?_=1{{ kl }}{{ kt }}{{ kq }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if not provider %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Toutes</a>
+  <a href="/ui/videos?_=1{{ kl }}{{ kt }}{{ kq }}{{ ks }}" class="rounded-lg px-3 py-1.5 text-sm font-medium {% if not provider %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">Toutes</a>
   {% for p in providers %}
-  <a href="/ui/videos?provider={{ p }}{{ kl }}{{ kt }}{{ kq }}" class="rounded-lg px-3 py-1.5 text-sm font-medium capitalize {% if provider == p %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">{{ p }}</a>
+  <a href="/ui/videos?provider={{ p }}{{ kl }}{{ kt }}{{ kq }}{{ ks }}" class="rounded-lg px-3 py-1.5 text-sm font-medium capitalize {% if provider == p %}bg-[#018B96] text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-100{% endif %}">{{ p }}</a>
   {% endfor %}
 </div>
 {% endif %}
@@ -40,6 +48,7 @@
   <input type="hidden" name="language" value="{{ language or '' }}">
   <input type="hidden" name="transcript" value="{{ transcript or '' }}">
   <input type="hidden" name="provider" value="{{ provider or '' }}">
+  <input type="hidden" name="silver" value="{{ silver or '' }}">
   <div class="relative max-w-md">
     <span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">🔎</span>
     <input name="q" value="{{ q or '' }}" type="search" placeholder="Rechercher un titre, une chaîne, une URL…"
@@ -51,7 +60,7 @@
   <!-- Toolbar : compteur de sélection + actions ZIP / suppression -->
   <div class="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3">
     <span id="selcount" class="text-sm text-slate-500">0 sélectionnée(s)</span>
-    <div class="ml-auto flex items-center gap-2">
+    <div class="ml-auto flex flex-wrap items-center gap-2">
       <button id="delsel" type="button" disabled
               hx-post="/ui/videos/bulk-delete?language={{ language or '' }}&transcript={{ transcript or '' }}&provider={{ provider or '' }}&q={{ q or '' }}"
               hx-include=".rowcb:checked" hx-target="#videos-tbody" hx-swap="innerHTML"
@@ -59,6 +68,15 @@
               class="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 px-3 py-1.5 text-sm font-medium text-rose-600 enabled:hover:bg-rose-50 disabled:opacity-40">
         🗑 Supprimer la sélection
       </button>
+      {# Version téléchargée : brut (bronze) ou nettoyé (silver). S'applique aux deux boutons de téléchargement. #}
+      <label class="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+        Version
+        <select name="layer"
+                class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-slate-700 focus:border-[#018B96] focus:outline-none focus:ring-1 focus:ring-[#018B96]">
+          <option value="bronze">Brut (bronze)</option>
+          <option value="silver">Nettoyé (silver)</option>
+        </select>
+      </label>
       <button id="zipsel" type="submit" disabled
               class="inline-flex items-center gap-1.5 rounded-lg bg-[#018B96] px-3 py-1.5 text-sm font-medium text-white enabled:hover:bg-slate-700 disabled:opacity-40">
         ⬇ Télécharger la sélection (ZIP)
@@ -93,12 +111,12 @@
     <div class="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-sm">
       <span class="text-slate-400">Page {{ page }}{% if q %} · recherche « {{ q }} »{% endif %}</span>
       <div class="flex items-center gap-2">
-        <a {% if has_prev %}href="/ui/videos?page={{ page-1 }}{{ kl }}{{ kt }}{{ kp }}{{ kq }}"
-              hx-get="/ui/videos?page={{ page-1 }}{{ kl }}{{ kt }}{{ kp }}{{ kq }}" hx-target="#videos-results" hx-select="#videos-results" hx-swap="outerHTML" hx-push-url="true"
+        <a {% if has_prev %}href="/ui/videos?page={{ page-1 }}{{ kl }}{{ kt }}{{ kp }}{{ kq }}{{ ks }}"
+              hx-get="/ui/videos?page={{ page-1 }}{{ kl }}{{ kt }}{{ kp }}{{ kq }}{{ ks }}" hx-target="#videos-results" hx-select="#videos-results" hx-swap="outerHTML" hx-push-url="true"
            {% else %}aria-disabled="true"{% endif %}
            class="rounded-lg border px-3 py-1.5 font-medium {% if has_prev %}border-slate-300 text-slate-700 hover:bg-slate-100{% else %}border-slate-200 text-slate-300 pointer-events-none{% endif %}">← Précédent</a>
-        <a {% if has_next %}href="/ui/videos?page={{ page+1 }}{{ kl }}{{ kt }}{{ kp }}{{ kq }}"
-              hx-get="/ui/videos?page={{ page+1 }}{{ kl }}{{ kt }}{{ kp }}{{ kq }}" hx-target="#videos-results" hx-select="#videos-results" hx-swap="outerHTML" hx-push-url="true"
+        <a {% if has_next %}href="/ui/videos?page={{ page+1 }}{{ kl }}{{ kt }}{{ kp }}{{ kq }}{{ ks }}"
+              hx-get="/ui/videos?page={{ page+1 }}{{ kl }}{{ kt }}{{ kp }}{{ kq }}{{ ks }}" hx-target="#videos-results" hx-select="#videos-results" hx-swap="outerHTML" hx-push-url="true"
            {% else %}aria-disabled="true"{% endif %}
            class="rounded-lg border px-3 py-1.5 font-medium {% if has_next %}border-slate-300 text-slate-700 hover:bg-slate-100{% else %}border-slate-200 text-slate-300 pointer-events-none{% endif %}">Suivant →</a>
       </div>

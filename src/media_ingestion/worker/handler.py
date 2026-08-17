@@ -23,6 +23,9 @@ class JobHandler:
     job_store: JobStorePort
     publisher: EventPublisherPort
     settings: Settings
+    # Pipeline de nettoyage silver, injecté quand storage=minio + silver_auto_process.
+    # None = pas d'enchaînement automatique après l'ingestion.
+    silver_pipeline: object | None = None
 
     def handle(self, event: dict) -> None:
         job_id = event["job_id"]
@@ -56,3 +59,23 @@ class JobHandler:
             },
         )
         log.info("job.completed", job_id=job_id, uri=result.storage_uri)
+
+        # Enchaînement automatique du nettoyage silver, juste après l'ingestion.
+        # Best-effort : un échec ici ne remet PAS le job en erreur (il est déjà
+        # terminé et le bronze est bien persisté) — on se contente de journaliser.
+        if self.silver_pipeline is not None and result.language:
+            try:
+                done = self.silver_pipeline.process_video(result.language, result.metadata.video_id)
+                log.info(
+                    "job.silver_auto",
+                    job_id=job_id,
+                    video_id=result.metadata.video_id,
+                    processed=done,
+                )
+            except Exception as exc:  # noqa: BLE001 - nettoyage best-effort
+                log.warning(
+                    "job.silver_auto_failed",
+                    job_id=job_id,
+                    video_id=result.metadata.video_id,
+                    error=str(exc),
+                )

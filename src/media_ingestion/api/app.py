@@ -19,6 +19,8 @@ from ..bootstrap import (
     build_job_store,
     build_playlist_resolver,
     build_publisher,
+    build_silver_pipeline,
+    build_silver_store,
     build_veille_run_log,
 )
 from ..config import Settings
@@ -101,6 +103,32 @@ def create_app(
 
     def _get_veille_run_log() -> VeilleRunLogPort:
         return veille_run_log or build_veille_run_log(settings)
+
+    def _get_silver_store():
+        return build_silver_store(settings)
+
+    def _get_silver_pipeline():
+        return build_silver_pipeline(settings)
+
+    def _get_silver_storage() -> StoragePort:
+        """StoragePort (MinIO) lié au bucket silver, pour lire/lire l'audio nettoyé.
+
+        Réutilise MinioStorage : ses méthodes de lecture ne dépendent que de l'URI
+        s3:// passée, donc le même adaptateur (bindé au bucket silver) sert les
+        artefacts silver avec la même signature d'URL présignée que le bronze.
+        """
+        from ..adapters.minio_storage import MinioStorage
+
+        return MinioStorage(
+            endpoint=settings.minio_endpoint,
+            access_key=settings.minio_access_key,
+            secret_key=settings.minio_secret_key,
+            bucket=settings.minio_bucket_silver or settings.minio_bucket,
+            secure=settings.minio_secure,
+            layer="silver",
+            public_endpoint=settings.minio_public_endpoint,
+            region=settings.minio_region,
+        )
 
     def _build_veille_use_case():
         from ..application.watch_channels import WatchChannelsUseCase
@@ -252,7 +280,9 @@ def create_app(
         fields = [f.strip().lower() for f in (reader.fieldnames or [])]
         col = next((c for c in ("channel", "url", "handle") if c in fields), None)
         if col is None:
-            raise HTTPException(status_code=400, detail="CSV must have a 'channel' (or 'url') column")
+            raise HTTPException(
+                status_code=400, detail="CSV must have a 'channel' (or 'url') column"
+            )
 
         cstore = _get_channel_store()
         existing = {c.channel_key for c in cstore.list_all()}
@@ -290,6 +320,21 @@ def create_app(
             for r in _get_veille_run_log().list_recent(limit)
         ]
 
+    @app.get("/silver/status")
+    def silver_status() -> dict:
+        """Compteurs bronze/silver (combien d'entrées restent à nettoyer)."""
+        bronze, silver = _get_silver_store().counts()
+        return {"bronze": bronze, "silver": silver, "pending": max(bronze - silver, 0)}
+
+    @app.post("/silver/run", status_code=202)
+    def silver_run(force: bool = Query(default=False)) -> dict:
+        """Lance un passage de nettoyage bronze -> silver (synchrone).
+
+        Traitement lourd (demucs + ffmpeg par vidéo) : à réserver aux petits lots
+        / à un appel orchestré (Airflow, worker). Renvoie le bilan du passage.
+        """
+        return _get_silver_pipeline().run(force=force).as_dict()
+
     @app.get("/videos", response_model=list[VideoItem])
     def list_videos(
         language: str | None = Query(default=None),
@@ -320,6 +365,9 @@ def create_app(
         get_channel_store=_get_channel_store,
         get_veille_run_log=_get_veille_run_log,
         run_veille=lambda: _build_veille_use_case().run_once(),
+        get_silver_store=_get_silver_store,
+        get_silver_pipeline=_get_silver_pipeline,
+        get_silver_storage=_get_silver_storage,
     )
 
     return app
